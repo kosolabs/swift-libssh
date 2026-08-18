@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.21.0](https://github.com/kosolabs/swift-lib-ssh/compare/v1.20.1...v1.21.0) (2026-08-18)
+
+
+### Features
+
+* import and validate private keys without a session ([#160](https://github.com/kosolabs/swift-lib-ssh/issues/160)) ([e78414c](https://github.com/kosolabs/swift-lib-ssh/commit/e78414c32bd9e4b18f2a04cc5da5eedf677dee2b))
+
 ## [1.20.1](https://github.com/kosolabs/swift-lib-ssh/compare/v1.20.0...v1.20.1) (2026-08-05)
 
 
