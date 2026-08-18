@@ -5,8 +5,19 @@ import Foundation
 public enum SSHAuthMethod: Sendable {
   case none
   case password(String)
-  case privateKey(URL, passphrase: String? = nil)
-  case privateKeyData(base64: String, passphrase: String? = nil)
+  case privateKey(SSHPrivateKey)
+
+  public static func privateKey(
+    contentsOf file: URL, passphrase: String? = nil
+  ) throws(SSHError) -> Self {
+    .privateKey(try SSHPrivateKey(contentsOf: file, passphrase: passphrase))
+  }
+
+  public static func privateKey(
+    contents: String, passphrase: String? = nil
+  ) throws(SSHError) -> Self {
+    .privateKey(try SSHPrivateKey(contents: contents, passphrase: passphrase))
+  }
 }
 
 public struct SSHClient: Sendable {
@@ -37,20 +48,8 @@ public struct SSHClient: Sendable {
     case .password(let password):
       try await session.authenticate(user: user, password: password)
 
-    case .privateKey(let url, let passphrase):
-      guard FileManager.default.fileExists(atPath: url.path) else {
-        throw SSHError.authenticationFailed(message: "Private key file not found: \(url)")
-      }
-      try await session.withImportedPrivateKey(from: url, passphrase: passphrase) {
-        privateKey throws(SSHError) in
-        try await privateKey.authenticate(user: user)
-      }
-
-    case .privateKeyData(let base64, let passphrase):
-      try await session.withImportedPrivateKey(from: base64, passphrase: passphrase) {
-        privateKey throws(SSHError) in
-        try await privateKey.authenticate(user: user)
-      }
+    case .privateKey(let key):
+      try await session.authenticate(user: user, key: key)
     }
   }
 

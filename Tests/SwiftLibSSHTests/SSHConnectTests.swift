@@ -39,6 +39,16 @@ private var publicKey: URL {
   )
 }
 
+private var encryptedPrivateKey: URL {
+  let env = ProcessInfo.processInfo.environment
+  return URL(
+    fileURLWithPath: env["SWIFT_LIBSSH_TEST_ENCRYPTED_PRIVATE_KEY_PATH"]
+      ?? "Tests/Data/id_ed25519_encrypted"
+  )
+}
+
+private let encryptedPassphrase = "hunter2"
+
 func client() async throws -> SSHClient {
   return try await SSHClient.connect(
     host: host, port: port, user: user, auth: .password(password))
@@ -77,7 +87,7 @@ struct SSHConnectTests {
 
   @Test func privateKeyFileAuthenticationSucceeds() async throws {
     try await SSHClient.withAuthenticatedClient(
-      host: host, port: port, user: user, auth: .privateKey(privateKey)
+      host: host, port: port, user: user, auth: try .privateKey(contentsOf: privateKey)
     ) { ssh in
 
       let proc = try await ssh.execute("whoami")
@@ -94,9 +104,53 @@ struct SSHConnectTests {
   @Test func base64PrivateKeyAuthenticationSucceeds() async throws {
     let privateKey = try String(contentsOf: privateKey, encoding: .utf8)
     try await SSHClient.withAuthenticatedClient(
-      host: host, port: port, user: user, auth: .privateKeyData(base64: privateKey)
+      host: host, port: port, user: user, auth: try .privateKey(contents: privateKey)
     ) { ssh in
 
+      let proc = try await ssh.execute("whoami")
+      let actual = try proc.stdout
+        .decoded(as: .utf8)
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+
+      let expected = user
+      #expect(actual == expected)
+      #expect(proc.status.code == 0)
+    }
+  }
+
+  @Test func importedPrivateKeyAuthenticationSucceeds() async throws {
+    let key = try SSHPrivateKey(contentsOf: privateKey)
+    try await SSHClient.withAuthenticatedClient(
+      host: host, port: port, user: user, auth: .privateKey(key)
+    ) { ssh in
+      let proc = try await ssh.execute("whoami")
+      let actual = try proc.stdout
+        .decoded(as: .utf8)
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+
+      let expected = user
+      #expect(actual == expected)
+      #expect(proc.status.code == 0)
+    }
+  }
+
+  @Test func importedPrivateKeyIsReusableAcrossConnections() async throws {
+    let key = try SSHPrivateKey(contentsOf: privateKey)
+    for _ in 0..<3 {
+      try await SSHClient.withAuthenticatedClient(
+        host: host, port: port, user: user, auth: .privateKey(key)
+      ) { ssh in
+        let proc = try await ssh.execute("true")
+        #expect(proc.status.code == 0)
+      }
+    }
+  }
+
+  @Test func encryptedPrivateKeyAuthenticationSucceeds() async throws {
+    try await SSHClient.withAuthenticatedClient(
+      host: host, port: port, user: user,
+      auth: try .privateKey(contentsOf: encryptedPrivateKey, passphrase: encryptedPassphrase)
+    ) { ssh in
       let proc = try await ssh.execute("whoami")
       let actual = try proc.stdout
         .decoded(as: .utf8)
@@ -124,31 +178,41 @@ struct SSHConnectTests {
     }
   }
 
-  @Test func missingPrivateKeyThrowsAuthenticationFailed() async throws {
+  @Test func missingPrivateKeyThrowsUnreadable() async throws {
     await #expect {
       try await SSHClient.connect(
         host: host, port: port, user: user,
-        auth: .privateKey(URL(filePath: "/tmp/missing_pk")))
+        auth: try .privateKey(contentsOf: URL(filePath: "/tmp/missing_pk")))
     } throws: { error in
-      (error as? SSHError)?.isAuthenticationFailed == true
+      (error as? SSHError)?.keyError == .unreadable
     }
   }
 
-  @Test func invalidPrivateKeyThrowsAuthenticationFailed() async throws {
+  @Test func invalidPrivateKeyThrowsInvalid() async throws {
     await #expect {
       try await SSHClient.connect(
-        host: host, port: port, user: user, auth: .privateKey(publicKey))
+        host: host, port: port, user: user, auth: .privateKey(contentsOf: publicKey))
     } throws: { error in
-      (error as? SSHError)?.isAuthenticationFailed == true
+      (error as? SSHError)?.keyError == .invalid
     }
   }
 
-  @Test func invalidBase64PrivateKeyThrowsAuthenticationFailed() async throws {
+  @Test func invalidKeyContentsThrowsInvalid() async throws {
     await #expect {
       try await SSHClient.connect(
-        host: host, port: port, user: user, auth: .privateKeyData(base64: ""))
+        host: host, port: port, user: user, auth: .privateKey(contents: ""))
     } throws: { error in
-      (error as? SSHError)?.isAuthenticationFailed == true
+      (error as? SSHError)?.keyError == .invalid
+    }
+  }
+
+  @Test func encryptedPrivateKeyWithoutPassphraseThrowsPassphraseRequired() async throws {
+    await #expect {
+      try await SSHClient.connect(
+        host: host, port: port, user: user,
+        auth: .privateKey(contentsOf: encryptedPrivateKey))
+    } throws: { error in
+      (error as? SSHError)?.keyError == .passphraseRequired
     }
   }
 

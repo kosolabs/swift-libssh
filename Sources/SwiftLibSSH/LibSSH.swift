@@ -39,10 +39,6 @@ public enum StreamType: Int32, Sendable {
 
 // MARK: - Identifiers
 
-struct SSHKeyID: Hashable, Sendable {
-  let uuid = UUID()
-}
-
 struct SSHChannelID: Hashable, Sendable {
   let uuid = UUID()
 }
@@ -104,9 +100,16 @@ public enum SFTPError: Codable, Error, Sendable, Equatable {
   }
 }
 
+public enum SSHKeyError: Codable, Error, Sendable, Equatable {
+  case unreadable
+  case passphraseRequired
+  case invalid
+}
+
 public enum SSHError: Codable, Error, Sendable, Equatable {
   case connectionFailed(message: String)
   case authenticationFailed(message: String)
+  case keyError(SSHKeyError, message: String)
   case sftpError(SFTPError, message: String)
   case libraryError(code: Int32, message: String)
   case invalidState(message: String)
@@ -132,6 +135,11 @@ public enum SSHError: Codable, Error, Sendable, Equatable {
     return false
   }
 
+  public var keyError: SSHKeyError? {
+    guard case .keyError(let error, _) = self else { return nil }
+    return error
+  }
+
   public var sftpError: SFTPError? {
     guard case .sftpError(let error, _) = self else { return nil }
     return error
@@ -150,7 +158,6 @@ public enum SSHError: Codable, Error, Sendable, Equatable {
 
 final actor SSHSession {
   private var session: ssh_session?
-  private var keys: [SSHKeyID: ssh_key] = [:]
   private var channels: [SSHChannelID: ssh_channel] = [:]
   private var sftps: [SFTPClientID: sftp_session] = [:]
 
@@ -250,66 +257,18 @@ final actor SSHSession {
     try validate(ssh_userauth_password(session, user, password))
   }
 
+  func authenticate(user: String, key: SSHPrivateKey) throws(SSHError) {
+    try key.withKey { key throws(SSHError) in
+      try validate(ssh_userauth_publickey(session, user, key))
+    }
+  }
+
   var isConnected: Bool {
     ssh_is_connected(session) == 1
   }
 
   func disconnect() {
     ssh_disconnect(session)
-  }
-
-  // MARK: - Key Operations
-
-  func withImportedPrivateKey<T: Sendable>(
-    _id: SSHKeyID = SSHKeyID(), from file: URL, passphrase: String? = nil,
-    perform body: @Sendable (SSHKey) async throws(SSHError) -> T
-  ) async throws(SSHError) -> T {
-    let key = try importPrivateKey(_id: _id, from: file, passphrase: passphrase)
-    defer { freeKey(id: _id) }
-    return try await body(key)
-  }
-
-  func importPrivateKey(
-    _id: SSHKeyID = SSHKeyID(), from file: URL, passphrase: String? = nil
-  ) throws(SSHError) -> SSHKey {
-    var key: ssh_key?
-    guard ssh_pki_import_privkey_file(file.path, passphrase, nil, nil, &key) == SSH_OK else {
-      throw SSHError.authenticationFailed(message: "Failed to import private key")
-    }
-    keys[_id] = key!
-    return SSHKey(session: self, id: _id)
-  }
-
-  func withImportedPrivateKey<T: Sendable>(
-    _id: SSHKeyID = SSHKeyID(), from base64: String, passphrase: String? = nil,
-    perform body: @Sendable (SSHKey) async throws(SSHError) -> T
-  ) async throws(SSHError) -> T {
-    let key = try importPrivateKey(_id: _id, from: base64, passphrase: passphrase)
-    defer { freeKey(id: _id) }
-    return try await body(key)
-  }
-
-  func importPrivateKey(
-    _id: SSHKeyID = SSHKeyID(), from base64: String, passphrase: String? = nil
-  ) throws(SSHError) -> SSHKey {
-    var key: ssh_key?
-    guard ssh_pki_import_privkey_base64(base64, passphrase, nil, nil, &key) == SSH_OK else {
-      throw SSHError.authenticationFailed(message: "Failed to import private key")
-    }
-    keys[_id] = key!
-    return SSHKey(session: self, id: _id)
-  }
-
-  func authenticateWithPublicKey(id: SSHKeyID, user: String) throws(SSHError) {
-    guard let key = keys[id] else {
-      throw SSHError.invalidState(message: "Key \(id) not found")
-    }
-    try validate(ssh_userauth_publickey(session, user, key))
-  }
-
-  func freeKey(id: SSHKeyID) {
-    guard let key = keys.removeValue(forKey: id) else { return }
-    ssh_key_free(key)
   }
 
   // MARK: - Channel Operations
