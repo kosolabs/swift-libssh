@@ -19,7 +19,7 @@ struct SSHConfig: ParsableArguments {
   func connect() async throws -> (ssh: SSHClient, sftp: SFTPClient) {
     let ssh = try await SSHClient.connect(
       host: host, port: port, user: loginName,
-      auth: .privateKey(URL(fileURLWithPath: identityFile))
+      auth: .privateKey(contentsOf: URL(fileURLWithPath: identityFile))
     )
 
     let sftp = try await ssh.sftp()
