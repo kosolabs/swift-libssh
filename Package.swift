@@ -2,7 +2,7 @@
 import PackageDescription
 
 let package = Package(
-  name: "SwiftLibSSH",
+  name: "swift-libssh",
   platforms: [
     .macOS(.v15)
   ],

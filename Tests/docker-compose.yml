@@ -2,7 +2,7 @@ services:
   ssh-test-server:
     build:
       dockerfile: Dockerfile
-    container_name: swift-lib-ssh-test-server
+    container_name: swift-libssh-test-server
     ports:
       - "2222:22"
     environment:
