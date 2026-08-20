@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.21.1](https://github.com/kosolabs/swift-libssh/compare/v1.21.0...v1.21.1) (2026-08-20)
+
+
+### Bug Fixes
+
+* adopt standard naming conventions ([#162](https://github.com/kosolabs/swift-libssh/issues/162)) ([bc8737e](https://github.com/kosolabs/swift-libssh/commit/bc8737e3edc441512e8e062b23f14e3535895315))
+
 ## [1.21.0](https://github.com/kosolabs/swift-libssh/compare/v1.20.1...v1.21.0) (2026-08-18)
 
 
