@@ -264,6 +264,35 @@ struct SFTPClientTests {
       }
     }
 
+    @Test func createDirectoryDefaultModeDelegatesToServerUmask() async throws {
+      try await withAuthenticatedClient { ssh in
+        let path = "/tmp/test-create-directory-default-mode"
+        try await ssh.execute("rm -rf \(path)")
+
+        let attrs = try await ssh.withSftp { sftp in
+          try await sftp.createDirectory(at: path)
+          return try await sftp.attributes(at: path)
+        }
+
+        // 0o777 requested, reduced by the server's 002 umask.
+        #expect((attrs.permissions! & 0o777) == 0o775)
+      }
+    }
+
+    @Test func createDirectoryHonorsExplicitMode() async throws {
+      try await withAuthenticatedClient { ssh in
+        let path = "/tmp/test-create-directory-explicit-mode"
+        try await ssh.execute("rm -rf \(path)")
+
+        let attrs = try await ssh.withSftp { sftp in
+          try await sftp.createDirectory(at: path, mode: 0o700)
+          return try await sftp.attributes(at: path)
+        }
+
+        #expect((attrs.permissions! & 0o777) == 0o700)
+      }
+    }
+
     @Test func createExistingDirectoryThrowsFileAlreadyExists() async throws {
       await #expect {
         try await withAuthenticatedClient { ssh in
@@ -294,6 +323,24 @@ struct SFTPClientTests {
           try await sftp.attributes(at: path)
         }
         #expect(attrs.type == .directory)
+      }
+    }
+
+    @Test func createDirectoryRecursivelyAppliesModeToEveryLevel() async throws {
+      try await withAuthenticatedClient { ssh in
+        let base = "/tmp/test-create-recursive-mode"
+        try await ssh.execute("rm -rf \(base)")
+
+        let permissions = try await ssh.withSftp { sftp -> [UInt32] in
+          try await sftp.createDirectoryRecursively(at: "\(base)/a/b")
+          var result: [UInt32] = []
+          for path in [base, "\(base)/a", "\(base)/a/b"] {
+            result.append(try await sftp.attributes(at: path).permissions! & 0o777)
+          }
+          return result
+        }
+
+        #expect(permissions == [0o775, 0o775, 0o775])
       }
     }
 
@@ -686,6 +733,28 @@ struct SFTPClientTests {
   }
 
   struct Upload {
+    @Test func uploadDefaultModeDelegatesToServerUmask() async throws {
+      try await withAuthenticatedClient { ssh in
+        let srcURL = FileManager
+          .default
+          .temporaryDirectory
+          .appendingPathComponent("ul-default-mode.dat")
+
+        let destPath = "/tmp/ul-default-mode.dat"
+
+        try shell("dd if=/dev/urandom of=\(srcURL.path) bs=1024 count=1")
+        try await ssh.execute("rm -f \(destPath)")
+
+        let attrs = try await ssh.withSftp { sftp in
+          try await sftp.upload(from: srcURL, to: destPath)
+          return try await sftp.attributes(at: destPath)
+        }
+
+        // 0o666 requested, reduced by the server's 002 umask.
+        #expect((attrs.permissions! & 0o777) == 0o664)
+      }
+    }
+
     @Test func uploadSucceeds() async throws {
       try await withAuthenticatedClient { ssh in
         let srcURL = FileManager

@@ -41,6 +41,7 @@ jobs:
           -o PasswordAuthentication=yes \
           -o PubkeyAuthentication=yes \
           -o AuthorizedKeysFile=.ssh/authorized_keys \
+          -o "Subsystem=sftp /usr/libexec/sftp-server -u 0002" \
           -E /tmp/sshd.log
         
         # Wait for sshd to be ready
