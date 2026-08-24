@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.21.2](https://github.com/kosolabs/swift-libssh/compare/v1.21.1...v1.21.2) (2026-08-24)
+
+
+### Bug Fixes
+
+* align default SFTP modes with OpenSSH standards ([#164](https://github.com/kosolabs/swift-libssh/issues/164)) ([86fe642](https://github.com/kosolabs/swift-libssh/commit/86fe642edc17753666f347dbb72cc22cec10f65a))
+
 ## [1.21.1](https://github.com/kosolabs/swift-libssh/compare/v1.21.0...v1.21.1) (2026-08-20)
 
 
