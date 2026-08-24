@@ -381,7 +381,7 @@ final actor SSHSession {
     sftp_free(sftp)
   }
 
-  func mkdir(id: SFTPClientID, at path: String, mode: mode_t = 0o755) throws(SSHError) {
+  func mkdir(id: SFTPClientID, at path: String, mode: mode_t = 0o777) throws(SSHError) {
     let sftp = try sftp(id: id)
     try validate(sftp_mkdir(sftp, path, mode), sftp: sftp)
   }
@@ -498,8 +498,8 @@ final actor SSHSession {
 
   func withSftpFile<T: Sendable>(
     _id: SFTPFileID? = nil,
-    id: SFTPClientID, path: String, accessType: AccessType, mode: mode_t = 0, limits: SFTPLimits,
-    perform body: (SFTPFile) async throws -> T
+    id: SFTPClientID, path: String, accessType: AccessType, mode: mode_t = 0o666,
+    limits: SFTPLimits, perform body: (SFTPFile) async throws -> T
   ) async throws -> T {
     let _id = _id ?? SFTPFileID(sftpId: id)
     let file = try openFile(
@@ -511,7 +511,7 @@ final actor SSHSession {
 
   func openFile(
     _id: SFTPFileID? = nil,
-    id: SFTPClientID, path: String, accessType: AccessType, mode: mode_t = 0, limits: SFTPLimits
+    id: SFTPClientID, path: String, accessType: AccessType, mode: mode_t = 0o666, limits: SFTPLimits
   ) throws(SSHError) -> SFTPFile {
     let _id = _id ?? SFTPFileID(sftpId: id)
     let sftp = try sftp(id: id)

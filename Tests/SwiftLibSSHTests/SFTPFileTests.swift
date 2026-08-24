@@ -313,6 +313,23 @@ struct SFTPFileTests {
   }
 
   struct Write {
+    @Test func createdFileDefaultModeDelegatesToServerUmask() async throws {
+      try await withAuthenticatedClient { ssh in
+        let destPath = "/tmp/write-default-mode.dat"
+        try await ssh.execute("rm -f \(destPath)")
+
+        let attrs = try await ssh.withSftp { sftp in
+          try await sftp.withSftpFile(at: destPath, accessType: .writeOnly) { file in
+            try await file.write(data: Data("hello".utf8))
+          }
+          return try await sftp.attributes(at: destPath)
+        }
+
+        // 0o666 requested, reduced by the server's 002 umask.
+        #expect((attrs.permissions! & 0o777) == 0o664)
+      }
+    }
+
     @Test func writeSmallSucceeds() async throws {
       try await withAuthenticatedClient { ssh in
         let destPath = "/tmp/write-small-test.dat"

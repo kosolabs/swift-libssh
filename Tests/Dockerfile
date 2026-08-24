@@ -19,6 +19,9 @@ RUN sed -i 's/^#\?PasswordAuthentication .*/PasswordAuthentication yes/' /etc/ss
 RUN sed -i 's/^#\?PermitRootLogin .*/PermitRootLogin yes/' /etc/ssh/sshd_config
 RUN sed -i 's/^#\?PubkeyAuthentication .*/PubkeyAuthentication yes/' /etc/ssh/sshd_config
 
+# Configure SFTP subsystem umask to 002
+RUN sed -i 's|^Subsystem\s\+sftp\s\+.*|Subsystem sftp /usr/lib/openssh/sftp-server -u 0002|' /etc/ssh/sshd_config
+
 # Set up SSH keys for public key authentication
 RUN mkdir -p /home/$USERNAME/.ssh
 RUN chmod 700 /home/$USERNAME/.ssh

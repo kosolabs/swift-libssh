@@ -15,12 +15,12 @@ public struct SFTPClient: Sendable {
     await session.freeSftp(id: id)
   }
 
-  public func createDirectory(at path: String, mode: mode_t = 0o755) async throws(SSHError) {
+  public func createDirectory(at path: String, mode: mode_t = 0o777) async throws(SSHError) {
     try await session.mkdir(id: id, at: path, mode: mode)
   }
 
   public func createDirectoryRecursively(
-    at path: String, mode: mode_t = 0o755
+    at path: String, mode: mode_t = 0o777
   ) async throws(SSHError) {
     let isAbsolute = path.hasPrefix("/")
     let components = path.split(separator: "/", omittingEmptySubsequences: true).map(String.init)
@@ -107,7 +107,7 @@ public struct SFTPClient: Sendable {
   }
 
   public func withSftpFile<T: Sendable>(
-    at path: String, accessType: AccessType, mode: mode_t = 0,
+    at path: String, accessType: AccessType, mode: mode_t = 0o666,
     perform: @Sendable (SFTPFile) async throws -> T
   ) async throws -> T {
     try await session.withSftpFile(
@@ -126,7 +126,7 @@ public struct SFTPClient: Sendable {
   }
 
   public func upload(
-    from localURL: URL, to remotePath: String, mode: mode_t = 0,
+    from localURL: URL, to remotePath: String, mode: mode_t = 0o666,
     bufferSize: UInt64 = SFTPLimits.defaultBufferSize,
     progress: (@Sendable (UInt64) -> Void)? = nil
   ) async throws {
