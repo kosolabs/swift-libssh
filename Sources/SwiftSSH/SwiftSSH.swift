@@ -12,12 +12,15 @@ struct SSHConfig: ParsableArguments {
   @Option(name: .shortAndLong, help: "The port to connect to on the remote host")
   var port: UInt16 = 22
 
+  @Option(name: .shortAndLong, help: "Session timeout in seconds")
+  var timeout: UInt = 60
+
   @Argument(help: "The remote host to connect to")
   var host: String
 
   func connect() async throws -> (ssh: SSHClient, sftp: SFTPClient) {
     let ssh = try await SSHClient.connect(
-      host: host, port: port, user: loginName,
+      host: host, port: port, timeout: timeout, user: loginName,
       auth: .privateKey(contentsOf: URL(fileURLWithPath: identityFile))
     )
 
