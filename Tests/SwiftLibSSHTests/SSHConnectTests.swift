@@ -19,13 +19,16 @@ private var port: UInt16 {
 
 private var user: String {
   let env = ProcessInfo.processInfo.environment
-  return env["SWIFT_LIBSSH_TEST_USER"] ?? "myuser"
+  return env["SWIFT_LIBSSH_TEST_USER"] ?? NSUserName()
 }
 
-private var password: String {
+private var password: String? {
   let env = ProcessInfo.processInfo.environment
-  return env["SWIFT_LIBSSH_TEST_PASSWORD"] ?? "mypass"
+  return env["SWIFT_LIBSSH_TEST_PASSWORD"]
 }
+
+private let passwordComment: Comment =
+  "Set SWIFT_LIBSSH_TEST_PASSWORD to the login password of the account running the test server."
 
 private var privateKey: URL {
   let env = ProcessInfo.processInfo.environment
@@ -51,7 +54,7 @@ private let encryptedPassphrase = "hunter2"
 
 func client() async throws -> SSHClient {
   return try await SSHClient.connect(
-    host: host, port: port, user: user, auth: .password(password))
+    host: host, port: port, user: user, auth: .privateKey(contentsOf: privateKey))
 }
 
 @discardableResult
@@ -70,9 +73,10 @@ func withAuthenticatedClient<T: Sendable>(
 }
 
 struct SSHConnectTests {
-  @Test func passwordAuthenticationSucceeds() async throws {
+  @Test(.enabled(if: password != nil, passwordComment))
+  func passwordAuthenticationSucceeds() async throws {
     try await SSHClient.withAuthenticatedClient(
-      host: host, port: port, user: user, auth: .password(password)
+      host: host, port: port, user: user, auth: .password(#require(password))
     ) { ssh in
       let proc = try await ssh.execute("whoami")
       let actual = try proc.stdout
@@ -87,7 +91,7 @@ struct SSHConnectTests {
 
   @Test func privateKeyFileAuthenticationSucceeds() async throws {
     try await SSHClient.withAuthenticatedClient(
-      host: host, port: port, user: user, auth: try .privateKey(contentsOf: privateKey)
+      host: host, port: port, user: user, auth: .privateKey(contentsOf: privateKey)
     ) { ssh in
 
       let proc = try await ssh.execute("whoami")
@@ -104,7 +108,7 @@ struct SSHConnectTests {
   @Test func base64PrivateKeyAuthenticationSucceeds() async throws {
     let privateKey = try String(contentsOf: privateKey, encoding: .utf8)
     try await SSHClient.withAuthenticatedClient(
-      host: host, port: port, user: user, auth: try .privateKey(contents: privateKey)
+      host: host, port: port, user: user, auth: .privateKey(contents: privateKey)
     ) { ssh in
 
       let proc = try await ssh.execute("whoami")
@@ -149,7 +153,7 @@ struct SSHConnectTests {
   @Test func encryptedPrivateKeyAuthenticationSucceeds() async throws {
     try await SSHClient.withAuthenticatedClient(
       host: host, port: port, user: user,
-      auth: try .privateKey(contentsOf: encryptedPrivateKey, passphrase: encryptedPassphrase)
+      auth: .privateKey(contentsOf: encryptedPrivateKey, passphrase: encryptedPassphrase)
     ) { ssh in
       let proc = try await ssh.execute("whoami")
       let actual = try proc.stdout
@@ -182,7 +186,7 @@ struct SSHConnectTests {
     await #expect {
       try await SSHClient.connect(
         host: host, port: port, user: user,
-        auth: try .privateKey(contentsOf: URL(filePath: "/tmp/missing_pk")))
+        auth: .privateKey(contentsOf: URL(filePath: "/tmp/missing_pk")))
     } throws: { error in
       (error as? SSHError)?.keyError == .unreadable
     }

@@ -8,3 +8,9 @@
 
 # macOS
 .DS_Store
+
+# Test SSH server runtime state
+scripts/test_server/host_key_ed25519
+scripts/test_server/host_key_ed25519.pub
+scripts/test_server/sshd.log
+scripts/test_server/sshd.pid

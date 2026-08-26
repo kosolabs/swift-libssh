@@ -8,58 +8,35 @@ jobs:
   functional-tests:
     name: Functional Tests
     runs-on: macos-latest
-    
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v7
-    
-    - name: Start native SSH test server
+
+    - name: Create the test server account
       run: |
         set -euxo pipefail
-
-        # Create test user with password
         sudo sysadminctl -addUser myuser -password mypass
-
-        # Ensure user shell and home directory
-        sudo dscl . -create /Users/myuser UserShell /bin/bash
+        sudo dscl . -create /Users/myuser UserShell /bin/zsh
         sudo createhomedir -c -u myuser
-
-        # Allow SSH via PAM access group
         sudo dseditgroup -o edit -a myuser -t user com.apple.access_ssh
 
-        # Set up authorized_keys with repo public key
-        sudo mkdir -p /Users/myuser/.ssh
-        sudo cp Tests/Data/id_ed25519.pub /Users/myuser/.ssh/authorized_keys
-        sudo chown -R myuser:staff /Users/myuser/.ssh
-        sudo chmod 700 /Users/myuser/.ssh
-        sudo chmod 600 /Users/myuser/.ssh/authorized_keys
-        sudo chmod 600 Tests/Data/id_ed25519
-        
-        # Generate host keys and start sshd on port 2222
-        sudo ssh-keygen -A
-        sudo /usr/sbin/sshd -p 2222 \
-          -o PasswordAuthentication=yes \
-          -o PubkeyAuthentication=yes \
-          -o AuthorizedKeysFile=.ssh/authorized_keys \
-          -o "Subsystem=sftp /usr/libexec/sftp-server -u 0002" \
-          -E /tmp/sshd.log
-        
-        # Wait for sshd to be ready
-        for i in $(seq 1 20); do
-          nc -z 127.0.0.1 2222 && break
-          sleep 1
-        done
+        chmod o+rx "$HOME" "$HOME/work" "$RUNNER_WORKSPACE" "$GITHUB_WORKSPACE"
+        chmod 777 scripts/test_server
 
-        if ! ssh -p 2222 -i Tests/Data/id_ed25519 \
-            -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-            myuser@localhost true; then
-          echo "sshd failed to start or auth failed"
-          echo "==== sshd.log ===="
-          sudo cat /tmp/sshd.log || true
-          exit 1
-        fi
-
-        echo "SSH Server is Up"
+    - name: Start SSH test server
+      run: sudo -u myuser ./scripts/start_test_server.sh
 
     - name: Run tests
+      env:
+        SWIFT_LIBSSH_TEST_USER: myuser
+        SWIFT_LIBSSH_TEST_PASSWORD: mypass
       run: swift test
+
+    - name: Dump sshd log
+      if: failure()
+      run: sudo tail -200 scripts/test_server/sshd.log
+
+    - name: Stop SSH test server
+      if: always()
+      run: sudo -u myuser ./scripts/stop_test_server.sh
