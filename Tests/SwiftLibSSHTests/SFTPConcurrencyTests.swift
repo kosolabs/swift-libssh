@@ -24,7 +24,7 @@ private struct WedgedError: Error, CustomStringConvertible {
 }
 
 private func withWatchdog(
-  seconds: Double, _ body: @escaping @Sendable () async throws -> Void
+  seconds: Double = 30, _ body: @escaping @Sendable () async throws -> Void
 ) async throws {
   let latch = Latch()
   let task = Task {
@@ -64,6 +64,84 @@ struct SFTPConcurrencyTests {
 
       #expect(actual.count > 0)
       #expect(actual.count < expected)
+    }
+  }
+
+  @Test func singleRequestStreamDuringConcurrentUploadSucceeds() async throws {
+    let remoteSource = "/tmp/single-request-source.dat"
+    let remoteUpload = "/tmp/single-request-upload.dat"
+    let localUpload = URL(fileURLWithPath: NSTemporaryDirectory())
+      .appendingPathComponent("single-request-upload.dat")
+    defer { try? FileManager.default.removeItem(at: localUpload) }
+
+    try await withWatchdog {
+      try await withAuthenticatedClient { ssh in
+        try await ssh.execute("dd if=/dev/urandom of=\(remoteSource) bs=1M count=8")
+        try shell("dd if=/dev/urandom of=\(localUpload.path) bs=1m count=4")
+
+        let sftp = try await ssh.sftp()
+        let window = sftp.limits.maxReadLength
+
+        await withTaskGroup(of: Void.self) { group in
+          group.addTask {
+            try? await sftp.upload(
+              from: localUpload, to: remoteUpload, bufferSize: sftp.limits.maxWriteLength
+            )
+          }
+
+          group.addTask {
+            try? await sftp.withSftpFile(at: remoteSource, accessType: .readOnly) { file in
+              for try await _ in file.stream(offset: 0, length: window, bufferSize: window) {}
+            }
+          }
+        }
+
+        // The session has to still be good for something afterwards.
+        let attributes = try await sftp.attributes(at: remoteSource)
+        #expect(attributes.size == 8 * 1024 * 1024)
+
+        try await ssh.execute("rm -f /tmp/single-request-*.dat")
+        await sftp.close()
+      }
+    }
+  }
+
+  @Test func pipelinedStreamDuringConcurrentUploadSucceeds() async throws {
+    let remoteSource = "/tmp/pipelined-source.dat"
+    let remoteUpload = "/tmp/pipelined-upload.dat"
+    let localUpload = URL(fileURLWithPath: NSTemporaryDirectory())
+      .appendingPathComponent("pipelined-upload.dat")
+    defer { try? FileManager.default.removeItem(at: localUpload) }
+
+    try await withWatchdog {
+      try await withAuthenticatedClient { ssh in
+        try await ssh.execute("dd if=/dev/urandom of=\(remoteSource) bs=1M count=8")
+        try shell("dd if=/dev/urandom of=\(localUpload.path) bs=1m count=4")
+
+        let sftp = try await ssh.sftp()
+        let window = sftp.limits.maxReadLength
+
+        await withTaskGroup(of: Void.self) { group in
+          group.addTask {
+            try? await sftp.upload(
+              from: localUpload, to: remoteUpload, bufferSize: sftp.limits.maxWriteLength
+            )
+          }
+
+          group.addTask {
+            try? await sftp.withSftpFile(at: remoteSource, accessType: .readOnly) { file in
+              for try await _ in file.stream(bufferSize: window) {}
+            }
+          }
+        }
+
+        // The session has to still be good for something afterwards.
+        let attributes = try await sftp.attributes(at: remoteSource)
+        #expect(attributes.size == 8 * 1024 * 1024)
+
+        try await ssh.execute("rm -f /tmp/pipelined-*.dat")
+        await sftp.close()
+      }
     }
   }
 }

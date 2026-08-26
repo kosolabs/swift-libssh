@@ -10,7 +10,7 @@ stop-test-server:
     docker compose -f Tests/docker-compose.yml down
 
 test: stop-test-server start-test-server
-    swift test --no-parallel
+    swift test
 
 stress *args="--workers 8 --iterations 25": start-test-server
     swift run -c release SwiftSSH stress \
