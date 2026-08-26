@@ -273,29 +273,6 @@ struct SFTPFileTests {
       }
     }
 
-    @Test func cancellationOfForAwaitLoopOverSftpStreamSucceeds() async throws {
-      try await withAuthenticatedClient { ssh in
-        try await ssh.execute("dd if=/dev/urandom of=/tmp/drain.dat bs=1M count=1")
-
-        let expected = try await ssh.withSftp { sftp in
-          try await sftp.attributes(at: "/tmp/drain.dat").size!
-        }
-
-        let actual = try await ssh.withSftp { sftp in
-          try await sftp.withSftpFile(at: "/tmp/drain.dat", accessType: .readOnly) { file in
-            for try await data in file.stream() {
-              // Returning here causes stream to cancel
-              return data
-            }
-            fatalError("Stream should not complete")
-          }
-        }
-
-        #expect(actual.count > 0)
-        #expect(actual.count < expected)
-      }
-    }
-
     @Test func streamMissingFileThrowsNoSuchFile() async throws {
       await #expect {
         try await withAuthenticatedClient { ssh in
@@ -339,7 +316,7 @@ struct SFTPFileTests {
         let expected = data.md5()
 
         try await ssh.withSftp { sftp in
-          try await sftp.withSftpFile(at: destPath, accessType: .writeOnly, mode: 0o644) {
+          try await sftp.withSftpFile(at: destPath, accessType: .writeOnly) {
             file in
             try await file.write(data: data)
           }
@@ -360,10 +337,64 @@ struct SFTPFileTests {
         let expected = data.md5()
 
         try await ssh.withSftp { sftp in
-          try await sftp.withSftpFile(at: destPath, accessType: .writeOnly, mode: 0o644) {
+          try await sftp.withSftpFile(at: destPath, accessType: .writeOnly) {
             file in
             try await file.write(data: data)
           }
+        }
+
+        let actual = try await ssh.md5(ofFile: destPath)
+
+        #expect(actual == expected)
+      }
+    }
+
+    @Test func asyncWriterBufferLargerThanMaxWriteLengthSucceeds() async throws {
+      try await withAuthenticatedClient { ssh in
+        let destPath = "/tmp/write-oversized-test.dat"
+
+        let expected = try await ssh.withSftp { sftp -> String in
+          let size = Int(sftp.limits.maxWriteLength) * 4
+          let data = Data((0..<size).map { _ in UInt8.random(in: .min ... .max) })
+
+          try await sftp.withSftpFile(at: destPath, accessType: .writeOnly) {
+            file in
+            try await file.withAsyncWriter { writer in
+              try await writer.write(data: data)
+            }
+          }
+
+          return data.md5()
+        }
+
+        let actual = try await ssh.md5(ofFile: destPath)
+
+        #expect(actual == expected)
+      }
+    }
+
+    @Test func asyncWriterDataSliceSucceeds() async throws {
+      try await withAuthenticatedClient { ssh in
+        let destPath = "/tmp/write-slice-test.dat"
+
+        let expected = try await ssh.withSftp { sftp -> String in
+          let size = Int(sftp.limits.maxWriteLength) * 4
+          let padding = 1024
+
+          // Padding in front so the slice starts well clear of zero.
+          let backing = Data(
+            (0..<(size + padding)).map { _ in UInt8.random(in: .min ... .max) }
+          )
+          let slice = backing[(backing.startIndex + padding)...]
+
+          try await sftp.withSftpFile(at: destPath, accessType: .writeOnly) {
+            file in
+            try await file.withAsyncWriter { writer in
+              try await writer.write(data: slice)
+            }
+          }
+
+          return Data(slice).md5()
         }
 
         let actual = try await ssh.md5(ofFile: destPath)

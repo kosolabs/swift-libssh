@@ -74,11 +74,15 @@ public class SFTPWriter {
   }
 
   public func write(data: Data) async throws(SSHError) {
-    while queue.count >= SFTPWriter.QueueSize {
-      try await queue.removeFirst().flush()
+    var remaining = data[...]
+    while !remaining.isEmpty {
+      if queue.count >= SFTPWriter.QueueSize {
+        try await queue.removeFirst().flush()
+      }
+      let aio = try await file.beginWrite(data: remaining)
+      remaining = remaining.dropFirst(aio.length)
+      queue.append(aio)
     }
-    let aio = try await file.beginWrite(data: data)
-    queue.append(aio)
   }
 
   public func flush() async throws(SSHError) {

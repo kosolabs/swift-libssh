@@ -19,7 +19,7 @@ struct SFTPAioReadContext: Sendable {
 struct SFTPAioWriteContext: Sendable {
   private let session: SSHSession
   private let id: SFTPAioID
-  private let length: Int
+  let length: Int
 
   init(session: SSHSession, id: SFTPAioID, length: Int) {
     self.session = session
