@@ -302,8 +302,8 @@ struct SFTPFileTests {
           return try await sftp.attributes(at: destPath)
         }
 
-        // 0o666 requested, reduced by the server's 002 umask.
-        #expect((attrs.permissions! & 0o777) == 0o664)
+        // 0o666 requested, reduced by the server's 022 umask.
+        #expect((attrs.permissions! & 0o777) == 0o644)
       }
     }
 

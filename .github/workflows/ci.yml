@@ -35,7 +35,7 @@ jobs:
 
     - name: Dump sshd log
       if: failure()
-      run: sudo tail -200 scripts/test_server/sshd.log
+      run: sudo tail -200 /tmp/ssh-test-server-myuser/sshd.log
 
     - name: Stop SSH test server
       if: always()
