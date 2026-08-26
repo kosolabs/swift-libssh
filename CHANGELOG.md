@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.22.0](https://github.com/kosolabs/swift-libssh/compare/v1.21.2...v1.22.0) (2026-08-26)
+
+
+### Features
+
+* add concurrent transfer stress test CLI command ([#166](https://github.com/kosolabs/swift-libssh/issues/166)) ([f353f3a](https://github.com/kosolabs/swift-libssh/commit/f353f3ad44cb8fc8d0a6c023915d6664c177d0d4))
+* add timeout argument to stress test ([212ea3b](https://github.com/kosolabs/swift-libssh/commit/212ea3b5fbcbd89f53d90bf94636b0e0a7f8e7f5))
+
+
+### Bug Fixes
+
+* deadlock caused by concurrent uploads and downloads ([#169](https://github.com/kosolabs/swift-libssh/issues/169)) ([c97bd41](https://github.com/kosolabs/swift-libssh/commit/c97bd41b72e765b14e228ab9db4e94ecb2423505))
+* write of large sliced data ([#168](https://github.com/kosolabs/swift-libssh/issues/168)) ([79b8c37](https://github.com/kosolabs/swift-libssh/commit/79b8c37a1144bab80d8dbc092b1c1f3f352eeb18))
+
 ## [1.21.2](https://github.com/kosolabs/swift-libssh/compare/v1.21.1...v1.21.2) (2026-08-24)
 
 
