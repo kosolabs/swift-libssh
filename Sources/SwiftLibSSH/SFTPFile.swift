@@ -47,7 +47,11 @@ public class SFTPReader: AsyncSequence {
 
       while queue.count < Iterator.QueueSize && count < length {
         let size = Swift.min(bufferSize, length - count)
-        let aio = try await file.beginRead(length: Int(size))
+        guard let aio = try await file.beginRead(length: Int(size)) else {
+          if !queue.isEmpty { break }
+          await Task.yield()
+          continue
+        }
         count += size
         queue.append(aio)
       }
@@ -76,10 +80,16 @@ public class SFTPWriter {
   public func write(data: Data) async throws(SSHError) {
     var remaining = data[...]
     while !remaining.isEmpty {
-      if queue.count >= SFTPWriter.QueueSize {
-        try await queue.removeFirst().flush()
+      guard queue.count < Self.QueueSize,
+        let aio = try await file.beginWrite(data: remaining)
+      else {
+        if queue.isEmpty {
+          await Task.yield()
+        } else {
+          try await queue.removeFirst().flush()
+        }
+        continue
       }
-      let aio = try await file.beginWrite(data: remaining)
       remaining = remaining.dropFirst(aio.length)
       queue.append(aio)
     }
@@ -158,7 +168,7 @@ public struct SFTPFile: Sendable {
     }
   }
 
-  func beginRead(length: Int) async throws(SSHError) -> SFTPAioReadContext {
+  func beginRead(length: Int) async throws(SSHError) -> SFTPAioReadContext? {
     try await session.beginRead(id: id, length: length)
   }
 
@@ -182,7 +192,7 @@ public struct SFTPFile: Sendable {
     return SFTPReader(file: self, offset: offset, length: length, bufferSize: bufferSize)
   }
 
-  func beginWrite(data: Data) async throws(SSHError) -> SFTPAioWriteContext {
+  func beginWrite(data: Data) async throws(SSHError) -> SFTPAioWriteContext? {
     try await session.beginWrite(id: id, buffer: data)
   }
 

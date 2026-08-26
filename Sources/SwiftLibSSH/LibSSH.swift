@@ -637,15 +637,25 @@ final actor SSHSession {
     return try body(aio)
   }
 
-  func beginRead(id: SFTPFileID, length: Int) throws(SSHError) -> SFTPAioReadContext {
+  private func sendableBytes(sftp: sftp_session, file: sftp_file) -> Int? {
+    guard let channel = sftp.pointee.channel else { return nil }
+    let overhead = Int(ssh_string_len(file.pointee.handle)) + 25
+    let available = Int(ssh_channel_window_size(channel)) - overhead
+    return available >= 0 ? available : nil
+  }
+
+  func beginRead(id: SFTPFileID, length: Int) throws(SSHError) -> SFTPAioReadContext? {
     let aioId = SFTPAioID(fileId: id)
     let file = try file(id: id)
+    let sftp = try sftp(id: id.sftpId)
+    guard sendableBytes(sftp: sftp, file: file) != nil else { return nil }
+
     let aio = UnsafeMutablePointer<sftp_aio?>.allocate(capacity: 1)
     files[id]?.aios[aioId] = aio
 
     let bytesToRead = sftp_aio_begin_read(file, length, aio)
     if bytesToRead < 0 {
-      try validate(bytesToRead, sftp: sftp(id: id.sftpId))
+      try validate(bytesToRead, sftp: sftp)
     }
 
     return SFTPAioReadContext(session: self, id: aioId, length: length)
@@ -665,14 +675,16 @@ final actor SSHSession {
     return bytesRead
   }
 
-  func beginWrite(id: SFTPFileID, buffer: Data) throws(SSHError) -> SFTPAioWriteContext {
+  func beginWrite(id: SFTPFileID, buffer: Data) throws(SSHError) -> SFTPAioWriteContext? {
     let aioId = SFTPAioID(fileId: id)
     let file = try file(id: id)
     let sftp = try sftp(id: id.sftpId)
+    guard let available = sendableBytes(sftp: sftp, file: file), available > 0 else { return nil }
+
     let aio = UnsafeMutablePointer<sftp_aio?>.allocate(capacity: 1)
     files[id]?.aios[aioId] = aio
 
-    let length = buffer.count
+    let length = Swift.min(buffer.count, available)
     let bytesToWrite = buffer.withUnsafeBytes({ raw in
       sftp_aio_begin_write(file, raw.baseAddress, length, aio)
     })
