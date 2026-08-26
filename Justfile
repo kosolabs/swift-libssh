@@ -1,6 +1,6 @@
 default: test
 
-start-test-server: stop-test-server
+start-test-server:
     ./scripts/start_test_server.sh
 
 stop-test-server:

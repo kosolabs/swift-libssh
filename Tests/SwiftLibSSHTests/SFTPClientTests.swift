@@ -274,8 +274,8 @@ struct SFTPClientTests {
           return try await sftp.attributes(at: path)
         }
 
-        // 0o777 requested, reduced by the server's 002 umask.
-        #expect((attrs.permissions! & 0o777) == 0o775)
+        // 0o777 requested, reduced by the server's 022 umask.
+        #expect((attrs.permissions! & 0o777) == 0o755)
       }
     }
 
@@ -340,7 +340,7 @@ struct SFTPClientTests {
           return result
         }
 
-        #expect(permissions == [0o775, 0o775, 0o775])
+        #expect(permissions == [0o755, 0o755, 0o755])
       }
     }
 
@@ -750,8 +750,8 @@ struct SFTPClientTests {
           return try await sftp.attributes(at: destPath)
         }
 
-        // 0o666 requested, reduced by the server's 002 umask.
-        #expect((attrs.permissions! & 0o777) == 0o664)
+        // 0o666 requested, reduced by the server's 022 umask.
+        #expect((attrs.permissions! & 0o777) == 0o644)
       }
     }
 

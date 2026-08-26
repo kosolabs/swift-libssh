@@ -1,9 +1,11 @@
 #!/bin/zsh
+#
+# Keep byte for byte identical to the copy in the other repo -- swift-libssh and
+# sshadow share one server.
 
 set -e
 
-SERVER_DIR="${0:a:h}/test_server"
-PID_FILE="$SERVER_DIR/sshd.pid"
+PID_FILE="/tmp/ssh-test-server-$(id -un)/sshd.pid"
 
 if [ -f "$PID_FILE" ]; then
     PID=$(cat "$PID_FILE")

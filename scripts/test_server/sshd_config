@@ -1,32 +1,16 @@
-# Unprivileged sshd used by the test suite. Runs as the invoking user on a
-# loopback-only high port, so it needs no sudo and creates no accounts.
-#
-# Paths that depend on the checkout location (host key, authorized keys, pid
-# file, sftp subsystem) are passed as -o overrides by start_test_server.sh.
+Port 2222
 
-# Loopback only. Password authentication is enabled below, and locally that
-# authenticates against the real login password of whoever runs the tests.
 ListenAddress 127.0.0.1
 ListenAddress ::1
 
-# The key lives in the checkout, which is not mode 700 and may be group
-# writable. sshd is unprivileged here, so it has nothing to protect.
 StrictModes no
 
-# PAM is what makes password authentication work without root: pam_opendirectory
-# verifies the invoking user's password, which an unprivileged process is
-# allowed to do. Required by SSHConnectTests' password tests.
 UsePAM yes
 PasswordAuthentication yes
 PubkeyAuthentication yes
-
-# Keep the offered method list to exactly what the tests exercise. Otherwise
-# keyboard-interactive also accepts the password via PAM, and the negative auth
-# tests can pass by way of a method the client never meant to use.
 KbdInteractiveAuthentication no
 GSSAPIAuthentication no
 
-# VERBOSE names the account and the method for every auth attempt, which is
-# what you need when CI cannot authenticate. DEBUG adds per-packet tracing and
-# turns a single test run into a megabyte of log.
+Subsystem sftp internal-sftp -u 022
+
 LogLevel VERBOSE
