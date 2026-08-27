@@ -1,5 +1,91 @@
+import ArgumentParser
 import CryptoKit
 import Foundation
+import SwiftLibSSH
+
+// MARK: - Topology
+
+extension ByteSize: ExpressibleByArgument {}
+
+/// How much state the concurrent workers share. Each tier exercises a different
+/// layer: reentrancy on one SFTP client, channel multiplexing on one session,
+/// and genuinely parallel sessions across executor threads.
+enum StressTopology: String, ExpressibleByArgument, CaseIterable {
+  /// One SSHClient, one SFTPClient, all workers interleaved through it.
+  case sharedSftp = "shared-sftp"
+  /// One SSHClient, one SFTPClient per worker.
+  case perWorkerSftp = "per-worker-sftp"
+  /// One SSHClient per worker.
+  case perWorkerSession = "per-worker-session"
+
+  /// Sets up whatever the topology shares between workers and tears it down
+  /// again once `body` returns.
+  func withShared<T>(
+    config: SSHConfig, perform body: (StressShared) async throws -> T
+  ) async throws -> T {
+    switch self {
+    case .sharedSftp:
+      return try await config.withConnection { ssh, sftp in
+        try await body(StressShared(ssh: ssh, sftp: sftp, topology: self, config: config))
+      }
+
+    case .perWorkerSftp:
+      return try await config.withSSHConnection { ssh in
+        try await body(StressShared(ssh: ssh, sftp: nil, topology: self, config: config))
+      }
+
+    case .perWorkerSession:
+      return try await body(StressShared(ssh: nil, sftp: nil, topology: self, config: config))
+    }
+  }
+}
+
+/// Resources shared by every worker. What is shared depends on the topology;
+/// a nil member means each worker makes its own.
+struct StressShared: Sendable {
+  let ssh: SSHClient?
+  let sftp: SFTPClient?
+  let topology: StressTopology
+  let config: SSHConfig
+
+  /// Per-worker resources plus the teardown for whatever this worker owns.
+  func withWorkerContext<T>(
+    perform body: (SSHClient, SFTPClient) async throws -> T
+  ) async throws -> T {
+    switch topology {
+    case .sharedSftp:
+      return try await body(ssh!, sftp!)
+
+    case .perWorkerSftp:
+      let ssh = ssh!
+      let sftp: SFTPClient
+      do {
+        sftp = try await ssh.sftp()
+      } catch {
+        // `sftp()` has typed throws, so `error` is already an SSHError here.
+        guard error.isChannelOpenFailed else { throw error }
+        throw StressError(
+          message: """
+            The server refused another SFTP channel on this connection. sshd caps \
+            sessions per connection (MaxSessions, 10 by default), which caps \
+            --workers for this topology: \(error)
+            """
+        )
+      }
+      do {
+        let result = try await body(ssh, sftp)
+        await sftp.close()
+        return result
+      } catch {
+        await sftp.close()
+        throw error
+      }
+
+    case .perWorkerSession:
+      return try await config.withConnection(body)
+    }
+  }
+}
 
 // MARK: - Deterministic Payloads
 
@@ -50,7 +136,8 @@ func writePayload(to url: URL, size: UInt64, seed: UInt64) throws -> String {
         var word = generator.next()
         let count = min(8, chunkSize - offset)
         withUnsafeBytes(of: &word) { bytes in
-          raw.baseAddress!.advanced(by: offset).copyMemory(from: bytes.baseAddress!, byteCount: count)
+          raw.baseAddress!.advanced(by: offset).copyMemory(
+            from: bytes.baseAddress!, byteCount: count)
         }
         offset += count
       }
@@ -61,6 +148,26 @@ func writePayload(to url: URL, size: UInt64, seed: UInt64) throws -> String {
   }
 
   return digest.finalize().map { String(format: "%02hhx", $0) }.joined()
+}
+
+/// Builds `size` deterministic bytes in memory. Small-file runs keep their
+/// payloads here rather than on disk: at thousands of files the local writes
+/// would dominate what we are trying to measure.
+func payloadData(size: Int, seed: UInt64) -> Data {
+  var generator = SplitMix64(seed: seed)
+  var data = Data(count: size)
+  data.withUnsafeMutableBytes { raw in
+    var offset = 0
+    while offset < size {
+      var word = generator.next()
+      let count = min(8, size - offset)
+      withUnsafeBytes(of: &word) { bytes in
+        raw.baseAddress!.advanced(by: offset).copyMemory(from: bytes.baseAddress!, byteCount: count)
+      }
+      offset += count
+    }
+  }
+  return data
 }
 
 /// Streams a local file through MD5 without holding it in memory.

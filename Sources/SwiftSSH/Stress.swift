@@ -3,20 +3,6 @@ import Foundation
 import SwiftLibSSH
 import Synchronization
 
-extension ByteSize: ExpressibleByArgument {}
-
-/// How much state the concurrent workers share. Each tier exercises a different
-/// layer: reentrancy on one SFTP client, channel multiplexing on one session,
-/// and genuinely parallel sessions across executor threads.
-enum StressTopology: String, ExpressibleByArgument, CaseIterable {
-  /// One SSHClient, one SFTPClient, all workers interleaved through it.
-  case sharedSftp = "shared-sftp"
-  /// One SSHClient, one SFTPClient per worker.
-  case perWorkerSftp = "per-worker-sftp"
-  /// One SSHClient per worker.
-  case perWorkerSession = "per-worker-session"
-}
-
 struct StressStats: Sendable {
   var uploads = 0
   var downloads = 0
@@ -129,7 +115,7 @@ struct Stress: AsyncParsableCommand {
 
     // A control connection owned by nobody in particular: it creates the remote
     // scratch directory, verifies checksums server-side, and cleans up at the end.
-    let (control, controlSftp) = try await sshConfig.connect()
+    let (control, controlSftp) = try await sshConfig.connectWithSftp()
     let limiter = ChannelLimiter(limit: verifyConcurrency)
     try await controlSftp.createDirectoryRecursively(at: remoteDir, mode: 0o755)
 
@@ -140,7 +126,7 @@ struct Stress: AsyncParsableCommand {
             stats: stats, start: start, baselineRss: baselineRss, baselineFds: baselineFds)
         }
 
-        try await withShared { shared in
+        try await topology.withShared(config: sshConfig) { shared in
           try await withThrowingTaskGroup(of: Void.self) { workerGroup in
             for worker in 0..<workers {
               workerGroup.addTask {
@@ -150,7 +136,10 @@ struct Stress: AsyncParsableCommand {
                 )
               }
             }
-            try await workerGroup.waitForAll()
+            // `waitForAll` collects errors and only rethrows once every worker
+            // has finished, which lets a run limp on for minutes after a setup
+            // failure. Iterating rethrows the first one and cancels the rest.
+            for try await _ in workerGroup {}
           }
         }
 
@@ -171,66 +160,13 @@ struct Stress: AsyncParsableCommand {
     }
   }
 
-  // MARK: - Topology
-
-  /// Resources shared by every worker. What is shared depends on the topology;
-  /// a nil member means each worker makes its own.
-  struct Shared: Sendable {
-    let ssh: SSHClient?
-    let sftp: SFTPClient?
-    let topology: StressTopology
-    let config: SSHConfig
-  }
-
-  /// Per-worker resources plus the teardown for whatever this worker owns.
-  private func withWorkerContext<T>(
-    shared: Shared, perform body: (SSHClient, SFTPClient) async throws -> T
-  ) async throws -> T {
-    switch shared.topology {
-    case .sharedSftp:
-      return try await body(shared.ssh!, shared.sftp!)
-
-    case .perWorkerSftp:
-      let ssh = shared.ssh!
-      let sftp = try await ssh.sftp()
-      do {
-        let result = try await body(ssh, sftp)
-        await sftp.close()
-        return result
-      } catch {
-        await sftp.close()
-        throw error
-      }
-
-    case .perWorkerSession:
-      return try await shared.config.withConnection(body)
-    }
-  }
-
-  private func withShared<T>(perform body: (Shared) async throws -> T) async throws -> T {
-    switch topology {
-    case .sharedSftp:
-      return try await sshConfig.withConnection { ssh, sftp in
-        try await body(Shared(ssh: ssh, sftp: sftp, topology: topology, config: sshConfig))
-      }
-
-    case .perWorkerSftp:
-      return try await sshConfig.withConnection { ssh, _ in
-        try await body(Shared(ssh: ssh, sftp: nil, topology: topology, config: sshConfig))
-      }
-
-    case .perWorkerSession:
-      return try await body(Shared(ssh: nil, sftp: nil, topology: topology, config: sshConfig))
-    }
-  }
-
   // MARK: - Worker
 
   private func runWorker(
-    worker: Int, runSeed: UInt64, shared: Shared,
+    worker: Int, runSeed: UInt64, shared: StressShared,
     control: SSHClient, limiter: ChannelLimiter, localDir: URL, stats: StressCounters
   ) async throws {
-    try await withWorkerContext(shared: shared) { ssh, sftp in
+    try await shared.withWorkerContext { ssh, sftp in
       for iteration in 0..<iterations {
         try Task.checkCancellation()
         do {
@@ -239,6 +175,8 @@ struct Stress: AsyncParsableCommand {
             ssh: ssh, sftp: sftp, control: control, limiter: limiter,
             localDir: localDir, stats: stats
           )
+        } catch is CancellationError {
+          throw CancellationError()
         } catch {
           stats.update { $0.errors += 1 }
           print("[worker \(worker) iteration \(iteration)] error: \(error)")
