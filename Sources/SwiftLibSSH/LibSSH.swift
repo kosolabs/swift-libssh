@@ -111,6 +111,7 @@ public enum SSHError: Codable, Error, Sendable, Equatable {
   case authenticationFailed(message: String)
   case keyError(SSHKeyError, message: String)
   case sftpError(SFTPError, message: String)
+  case channelOpenFailed(message: String)
   case libraryError(code: Int32, message: String)
   case invalidState(message: String)
 
@@ -145,6 +146,11 @@ public enum SSHError: Codable, Error, Sendable, Equatable {
     return error
   }
 
+  public var isChannelOpenFailed: Bool {
+    if case .channelOpenFailed = self { return true }
+    return false
+  }
+
   public var isLibraryError: Bool {
     if case .libraryError = self { return true }
     return false
@@ -153,6 +159,20 @@ public enum SSHError: Codable, Error, Sendable, Equatable {
   public var isInvalidState: Bool {
     if case .invalidState = self { return true }
     return false
+  }
+}
+
+private typealias ErrorMapper = (_ code: Int32, _ message: String) -> SSHError?
+
+private func channelOpenError(fallback: String) -> ErrorMapper {
+  { code, message in
+    if code == Int32(SSH_REQUEST_DENIED.rawValue) {
+      return .channelOpenFailed(message: message)
+    }
+    if code == 0 && message.isEmpty {
+      return .invalidState(message: fallback)
+    }
+    return nil
   }
 }
 
@@ -190,37 +210,57 @@ final actor SSHSession {
     ssh_get_error_code(UnsafeMutableRawPointer(session))
   }
 
-  private func throwError(sftp: sftp_session? = nil) throws(SSHError) -> Never {
+  private func error(
+    sftp: sftp_session? = nil,
+    mapError: ErrorMapper = { _, _ in nil }
+  ) -> SSHError {
     let message = getErrorMessage()
 
     if let sftp = sftp {
       let sftpCode = sftp_get_error(sftp)
       if let sftpError = SFTPError.from(code: sftpCode) {
-        throw SSHError.sftpError(sftpError, message: message)
+        return SSHError.sftpError(sftpError, message: message)
       }
     }
 
     let code = getErrorCode()
     if code == 0 && message.isEmpty && !isConnected {
-      throw SSHError.connectionFailed(message: "Connection lost")
+      return SSHError.connectionFailed(message: "Connection lost")
     }
 
-    throw SSHError.from(code: code, message: message)
+    return mapError(code, message) ?? SSHError.from(code: code, message: message)
   }
 
-  private func validate(_ code: Int, sftp: sftp_session? = nil) throws(SSHError) {
-    try validate(Int32(code), sftp: sftp)
+  private func validate(
+    _ code: Int,
+    sftp: sftp_session? = nil,
+    mapError: ErrorMapper = { _, _ in nil },
+    onFailure cleanup: () -> Void = {}
+  ) throws(SSHError) {
+    try validate(Int32(code), sftp: sftp, mapError: mapError, onFailure: cleanup)
   }
 
-  private func validate(_ code: Int32, sftp: sftp_session? = nil) throws(SSHError) {
+  private func validate(
+    _ code: Int32,
+    sftp: sftp_session? = nil,
+    mapError: ErrorMapper = { _, _ in nil },
+    onFailure cleanup: () -> Void = {}
+  ) throws(SSHError) {
     guard code == SSH_OK else {
-      try throwError(sftp: sftp)
+      cleanup()
+      throw error(sftp: sftp, mapError: mapError)
     }
   }
 
-  private func validate<E>(_ value: E?, sftp: sftp_session? = nil) throws(SSHError) -> E {
+  private func validate<E>(
+    _ value: E?,
+    sftp: sftp_session? = nil,
+    mapError: ErrorMapper = { _, _ in nil },
+    onFailure cleanup: () -> Void = {}
+  ) throws(SSHError) -> E {
     guard let value = value else {
-      try throwError(sftp: sftp)
+      cleanup()
+      throw error(sftp: sftp, mapError: mapError)
     }
     return value
   }
@@ -304,7 +344,14 @@ final actor SSHSession {
     guard let channel = ssh_channel_new(session) else {
       throw SSHError.invalidState(message: "Failed to initialize SSH channel")
     }
-    try validate(ssh_channel_open_session(channel))
+
+    try validate(
+      ssh_channel_open_session(channel),
+      mapError: channelOpenError(fallback: "Failed to open SSH channel")
+    ) {
+      ssh_channel_free(channel)
+    }
+
     channels[_id] = channel
     return SSHSessionChannel(session: self, id: _id)
   }
@@ -367,9 +414,9 @@ final actor SSHSession {
   }
 
   func createSftp(_id: SFTPClientID = SFTPClientID()) throws(SSHError) -> SFTPClient {
-    guard let sftp = sftp_new(session) else {
-      throw SSHError.invalidState(message: "Failed to initialize SFTP client")
-    }
+    let sftp = try validate(
+      sftp_new(session),
+      mapError: channelOpenError(fallback: "Failed to initialize SFTP client"))
     try validate(sftp_init(sftp))
     sftps[_id] = sftp
     let limits = try limits(id: _id)

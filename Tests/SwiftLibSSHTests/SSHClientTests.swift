@@ -131,4 +131,54 @@ struct SSHClientTests {
       #expect(!(await ssh.isConnected))
     }
   }
+
+  struct ChannelLimits {
+    @Test func exhaustingSftpChannelsThrowsChannelOpenFailed() async throws {
+      try await withAuthenticatedClient { ssh in
+        var clients: [SFTPClient] = []
+        var caught: SSHError?
+
+        for _ in 0..<64 {
+          do {
+            clients.append(try await ssh.sftp())
+          } catch let error as SSHError {
+            caught = error
+            break
+          }
+        }
+
+        for client in clients { await client.close() }
+
+        #expect(caught?.isChannelOpenFailed == true)
+      }
+    }
+
+    @Test func exhaustingExecuteChannelsThrowsChannelOpenFailed() async throws {
+      try await withAuthenticatedClient { ssh in
+        let failures = await withTaskGroup(of: SSHError?.self) { group in
+          for _ in 0..<64 {
+            group.addTask {
+              do {
+                _ = try await ssh.execute("sleep 2")
+                return nil
+              } catch let error as SSHError {
+                return error
+              } catch {
+                return nil
+              }
+            }
+          }
+
+          var seen: [SSHError] = []
+          for await result in group {
+            if let result { seen.append(result) }
+          }
+          return seen
+        }
+
+        #expect(!failures.isEmpty)
+        #expect(failures.allSatisfy { $0.isChannelOpenFailed })
+      }
+    }
+  }
 }
