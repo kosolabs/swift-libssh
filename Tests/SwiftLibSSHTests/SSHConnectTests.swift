@@ -14,7 +14,7 @@ private var port: UInt16 {
   if let portString = env["SWIFT_LIBSSH_TEST_PORT"], let port = UInt16(portString) {
     return port
   }
-  return 2222
+  return 2248
 }
 
 private var user: String {

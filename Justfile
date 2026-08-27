@@ -11,4 +11,4 @@ test: start-test-server
 
 stress *args="--workers 8 --iterations 25": start-test-server
     swift run -c release SwiftSSH stress \
-        -i Tests/Data/id_ed25519 -p 2222 -l "$(whoami)" localhost {{args}}
+        -i Tests/Data/id_ed25519 -p 2248 -l "$(whoami)" localhost {{args}}
