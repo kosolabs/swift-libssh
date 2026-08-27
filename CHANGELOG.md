@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.22.1](https://github.com/kosolabs/swift-libssh/compare/v1.22.0...v1.22.1) (2026-08-27)
+
+
+### Bug Fixes
+
+* error handling when all channels have been exhausted ([#174](https://github.com/kosolabs/swift-libssh/issues/174)) ([2937469](https://github.com/kosolabs/swift-libssh/commit/2937469fbc4f851b9f0b34fd044e7aac09f98c83))
+* various leaks caused by failed init ([#176](https://github.com/kosolabs/swift-libssh/issues/176)) ([7b7552c](https://github.com/kosolabs/swift-libssh/commit/7b7552c78b16e696da3fe860cd8a589d13712207))
+
 ## [1.22.0](https://github.com/kosolabs/swift-libssh/compare/v1.21.2...v1.22.0) (2026-08-26)
 
 
