@@ -30,10 +30,16 @@ public struct SSHClient: Sendable {
   private let session: SSHSession
 
   private init(host: String, port: UInt16 = 22, timeout: UInt = 60) async throws(SSHError) {
-    self.session = try SSHSession()
-    try await session.setHost(host)
-    try await session.setPort(UInt32(port))
-    try await session.setTimeout(timeout)
+    let session = try SSHSession()
+    do {
+      try await session.setHost(host)
+      try await session.setPort(UInt32(port))
+      try await session.setTimeout(timeout)
+    } catch {
+      await session.free()
+      throw error
+    }
+    self.session = session
   }
 
   private func connect() async throws(SSHError) {
@@ -58,9 +64,14 @@ public struct SSHClient: Sendable {
     user: String, auth: SSHAuthMethod = .none
   ) async throws(SSHError) -> SSHClient {
     let client = try await SSHClient(host: host, port: port, timeout: timeout)
-    try await client.connect()
-    try await client.authenticate(user: user, auth: auth)
-    return client
+    do {
+      try await client.connect()
+      try await client.authenticate(user: user, auth: auth)
+      return client
+    } catch {
+      await client.close()
+      throw error
+    }
   }
 
   @discardableResult
