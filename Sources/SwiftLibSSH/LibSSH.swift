@@ -374,8 +374,8 @@ final actor SSHSession {
     var signal: UnsafeMutablePointer<CChar>? = nil
     var coreDumped: Int32 = 0
 
-    try validate(ssh_channel_get_exit_state(channel, &code, &signal, &coreDumped))
     defer { ssh_string_free_char(signal) }
+    try validate(ssh_channel_get_exit_state(channel, &code, &signal, &coreDumped))
 
     return SSHExitStatus.from(code: code, signal: signal, coreDumped: coreDumped)
   }
@@ -416,10 +416,11 @@ final actor SSHSession {
   func createSftp(_id: SFTPClientID = SFTPClientID()) throws(SSHError) -> SFTPClient {
     let sftp = try validate(
       sftp_new(session),
-      mapError: channelOpenError(fallback: "Failed to initialize SFTP client"))
-    try validate(sftp_init(sftp))
+      mapError: channelOpenError(fallback: "Failed to initialize SFTP client")
+    )
+    try validate(sftp_init(sftp), sftp: sftp, onFailure: { sftp_free(sftp) })
+    let limits = try limits(sftp: sftp, onFailure: { sftp_free(sftp) })
     sftps[_id] = sftp
-    let limits = try limits(id: _id)
     return SFTPClient(session: self, id: _id, limits: limits)
   }
 
@@ -517,9 +518,10 @@ final actor SSHSession {
     try validate(sftp_symlink(sftp, target, dest), sftp: sftp)
   }
 
-  func limits(id: SFTPClientID) throws(SSHError) -> SFTPLimits {
-    let sftp = try sftp(id: id)
-    let raw = try validate(sftp_limits(sftp), sftp: sftp)
+  private func limits(sftp: sftp_session, onFailure cleanup: () -> Void = {})
+    throws(SSHError) -> SFTPLimits
+  {
+    let raw = try validate(sftp_limits(sftp), sftp: sftp, onFailure: cleanup)
     defer { sftp_limits_free(raw) }
     return SFTPLimits.from(raw: raw.pointee)
   }
@@ -697,7 +699,11 @@ final actor SSHSession {
     let sftp = try sftp(id: id.sftpId)
     guard sendableBytes(sftp: sftp, file: file) != nil else { return nil }
 
+    // `allocate` leaves the slot uninitialized and the aio is registered before the begin call
+    // runs, so a failed begin would leave `freeAio` reading garbage. libssh makes no promise
+    // about `*aio` on error; `sftp_aio_free(nil)` is a no-op.
     let aio = UnsafeMutablePointer<sftp_aio?>.allocate(capacity: 1)
+    aio.initialize(to: nil)
     files[id]?.aios[aioId] = aio
 
     let bytesToRead = sftp_aio_begin_read(file, length, aio)
@@ -728,7 +734,11 @@ final actor SSHSession {
     let sftp = try sftp(id: id.sftpId)
     guard let available = sendableBytes(sftp: sftp, file: file), available > 0 else { return nil }
 
+    // `allocate` leaves the slot uninitialized and the aio is registered before the begin call
+    // runs, so a failed begin would leave `freeAio` reading garbage. libssh makes no promise
+    // about `*aio` on error; `sftp_aio_free(nil)` is a no-op.
     let aio = UnsafeMutablePointer<sftp_aio?>.allocate(capacity: 1)
+    aio.initialize(to: nil)
     files[id]?.aios[aioId] = aio
 
     let length = Swift.min(buffer.count, available)
