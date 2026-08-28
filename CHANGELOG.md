@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.22.2](https://github.com/kosolabs/swift-libssh/compare/v1.22.1...v1.22.2) (2026-08-28)
+
+
+### Bug Fixes
+
+* creating an existing symlink throws file already exists ([#178](https://github.com/kosolabs/swift-libssh/issues/178)) ([5165700](https://github.com/kosolabs/swift-libssh/commit/5165700c49fa5fc588784601993a1448d4554bae))
+
 ## [1.22.1](https://github.com/kosolabs/swift-libssh/compare/v1.22.0...v1.22.1) (2026-08-27)
 
 
