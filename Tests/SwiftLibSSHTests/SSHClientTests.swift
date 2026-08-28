@@ -109,29 +109,6 @@ struct SSHClientTests {
     }
   }
 
-  struct CloseAndIsConnected {
-    @Test func connectedStatusIsConsistent() async throws {
-      let ssh = try await client()
-
-      #expect(await ssh.isConnected)
-
-      await ssh.close()
-
-      #expect(!(await ssh.isConnected))
-    }
-
-    @Test func testMultipleCallsToClose() async throws {
-      let ssh = try await client()
-
-      #expect(await ssh.isConnected)
-
-      await ssh.close()
-      await ssh.close()
-
-      #expect(!(await ssh.isConnected))
-    }
-  }
-
   struct ChannelLimits {
     @Test func exhaustingSftpChannelsThrowsChannelOpenFailed() async throws {
       try await withAuthenticatedClient { ssh in
@@ -179,6 +156,29 @@ struct SSHClientTests {
         #expect(!failures.isEmpty)
         #expect(failures.allSatisfy { $0.isChannelOpenFailed })
       }
+    }
+  }
+
+  struct Lifecycle {
+    @Test func connectedStatusIsConsistent() async throws {
+      let ssh = try await client()
+
+      #expect(await ssh.isConnected)
+
+      await ssh.close()
+
+      #expect(!(await ssh.isConnected))
+    }
+
+    @Test func testMultipleCallsToClose() async throws {
+      let ssh = try await client()
+
+      #expect(await ssh.isConnected)
+
+      await ssh.close()
+      await ssh.close()
+
+      #expect(!(await ssh.isConnected))
     }
   }
 }

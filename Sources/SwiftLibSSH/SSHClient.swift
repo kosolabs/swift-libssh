@@ -117,8 +117,7 @@ public struct SSHClient: Sendable {
   }
 
   public func close() async {
-    await session.disconnect()
-    await session.free()
+    await session.close()
   }
 
   @discardableResult

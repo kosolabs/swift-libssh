@@ -195,9 +195,23 @@ final actor SSHSession {
     self.session = session
   }
 
+  private func releaseResources() {
+    for id in Array(files.keys) { closeFile(id: id) }
+    for id in Array(directories.keys) { closeDirectory(id: id) }
+    for id in Array(sftps.keys) { freeSftp(id: id) }
+    for id in Array(channels.keys) { closeChannel(id: id) }
+  }
+
   func free() {
+    releaseResources()
     ssh_free(session)
     session = nil
+  }
+
+  func close() {
+    releaseResources()
+    disconnect()
+    free()
   }
 
   // MARK: - Error Handling

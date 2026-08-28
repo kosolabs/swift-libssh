@@ -936,4 +936,28 @@ struct SFTPClientTests {
       }
     }
   }
+
+  struct Lifecycle {
+
+    @Test func sftpCloseAfterSessionCloseSucceeds() async throws {
+      let ssh = try await client()
+      let sftp = try await ssh.sftp()
+
+      await ssh.close()
+      await sftp.close()
+    }
+
+    @Test func sftpOperationAfterCloseThrowsInvalidState() async throws {
+      let ssh = try await client()
+      let sftp = try await ssh.sftp()
+
+      await ssh.close()
+
+      await #expect {
+        _ = try await sftp.attributes(at: "/tmp")
+      } throws: { error in
+        (error as? SSHError)?.isInvalidState == true
+      }
+    }
+  }
 }
