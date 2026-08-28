@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.22.3](https://github.com/kosolabs/swift-libssh/compare/v1.22.2...v1.22.3) (2026-08-28)
+
+
+### Bug Fixes
+
+* use-after-free when sftp handles outlive a closed session ([#180](https://github.com/kosolabs/swift-libssh/issues/180)) ([0a481ee](https://github.com/kosolabs/swift-libssh/commit/0a481ee3e811d3db28555063ea18b40d1c5be693))
+
 ## [1.22.2](https://github.com/kosolabs/swift-libssh/compare/v1.22.1...v1.22.2) (2026-08-28)
 
 
