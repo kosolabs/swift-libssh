@@ -181,4 +181,15 @@ struct SSHClientTests {
       #expect(!(await ssh.isConnected))
     }
   }
+
+  @Test func executeAfterCloseThrowsConnectionFailed() async throws {
+    let ssh = try await client()
+    await ssh.close()
+
+    await #expect {
+      _ = try await ssh.execute("whoami")
+    } throws: { error in
+      (error as? SSHError)?.isConnectionFailed == true
+    }
+  }
 }

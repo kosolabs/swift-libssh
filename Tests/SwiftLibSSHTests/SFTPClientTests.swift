@@ -947,7 +947,7 @@ struct SFTPClientTests {
       await sftp.close()
     }
 
-    @Test func sftpOperationAfterCloseThrowsInvalidState() async throws {
+    @Test func sftpOperationAfterCloseThrowsConnectionFailed() async throws {
       let ssh = try await client()
       let sftp = try await ssh.sftp()
 
@@ -956,7 +956,29 @@ struct SFTPClientTests {
       await #expect {
         _ = try await sftp.attributes(at: "/tmp")
       } throws: { error in
-        (error as? SSHError)?.isInvalidState == true
+        (error as? SSHError)?.isConnectionFailed == true
+      }
+    }
+
+    @Test func openingSftpAfterCloseThrowsConnectionFailed() async throws {
+      let ssh = try await client()
+      await ssh.close()
+
+      await #expect {
+        _ = try await ssh.sftp()
+      } throws: { error in
+        (error as? SSHError)?.isConnectionFailed == true
+      }
+    }
+
+    @Test func sftpOperationAfterSftpCloseThrows() async throws {
+      try await withAuthenticatedClient { ssh in
+        let sftp = try await ssh.sftp()
+        await sftp.close()
+
+        await #expect(throws: SSHError.self) {
+          _ = try await sftp.attributes(at: "/tmp")
+        }
       }
     }
   }
