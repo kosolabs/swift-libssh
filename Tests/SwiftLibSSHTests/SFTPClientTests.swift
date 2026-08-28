@@ -571,7 +571,7 @@ struct SFTPClientTests {
       }
     }
 
-    @Test func createSymlinkAtExistingPathThrows() async throws {
+    @Test func createSymlinkAtExistingFileThrowsFileAlreadyExists() async throws {
       await #expect {
         try await withAuthenticatedClient { ssh in
           let link = "/tmp/symlink-existing.txt"
@@ -581,7 +581,34 @@ struct SFTPClientTests {
           }
         }
       } throws: { error in
-        (error as? SSHError)?.sftpError == .failure
+        (error as? SSHError)?.sftpError == .fileAlreadyExists
+      }
+    }
+
+    @Test func createSymlinkAtExistingSymlinkThrowsFileAlreadyExists() async throws {
+      await #expect {
+        try await withAuthenticatedClient { ssh in
+          let link = "/tmp/symlink-existing-link.txt"
+          try await ssh.execute("rm -f \(link) && ln -s /tmp/anything.txt \(link)")
+          try await ssh.withSftp { sftp in
+            try await sftp.createSymlink(to: "/tmp/anything.txt", at: link)
+          }
+        }
+      } throws: { error in
+        (error as? SSHError)?.sftpError == .fileAlreadyExists
+      }
+    }
+
+    @Test func createSymlinkInMissingDirectoryThrowsNoSuchFile() async throws {
+      await #expect {
+        try await withAuthenticatedClient { ssh in
+          try await ssh.withSftp { sftp in
+            try await sftp.createSymlink(
+              to: "/tmp/anything.txt", at: "/tmp/no-such-dir-\(UUID().uuidString)/link")
+          }
+        }
+      } throws: { error in
+        (error as? SSHError)?.sftpError == .noSuchFile
       }
     }
   }
