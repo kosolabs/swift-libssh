@@ -216,6 +216,12 @@ final actor SSHSession {
 
   // MARK: - Error Handling
 
+  private func requireOpenSession() throws(SSHError) {
+    if session == nil {
+      throw .connectionFailed(message: "SSH session is closed")
+    }
+  }
+
   private func getErrorMessage() -> String {
     String(cString: ssh_get_error(UnsafeMutableRawPointer(session)))
   }
@@ -228,21 +234,25 @@ final actor SSHSession {
     sftp: sftp_session? = nil,
     mapError: ErrorMapper = { _, _ in nil }
   ) -> SSHError {
+    if session == nil {
+      return .connectionFailed(message: "SSH session is closed")
+    }
+
     let message = getErrorMessage()
 
     if let sftp = sftp {
       let sftpCode = sftp_get_error(sftp)
       if let sftpError = SFTPError.from(code: sftpCode) {
-        return SSHError.sftpError(sftpError, message: message)
+        return .sftpError(sftpError, message: message)
       }
     }
 
     let code = getErrorCode()
     if code == 0 && message.isEmpty && !isConnected {
-      return SSHError.connectionFailed(message: "Connection lost")
+      return .connectionFailed(message: "Connection lost")
     }
 
-    return mapError(code, message) ?? SSHError.from(code: code, message: message)
+    return mapError(code, message) ?? .from(code: code, message: message)
   }
 
   private func validate(
@@ -328,8 +338,9 @@ final actor SSHSession {
   // MARK: - Channel Operations
 
   private func channel(id: SSHChannelID) throws(SSHError) -> ssh_channel {
+    try requireOpenSession()
     guard let channel = channels[id] else {
-      throw SSHError.invalidState(message: "Channel \(id) not found")
+      throw .invalidState(message: "Channel \(id) not found")
     }
     return channel
   }
@@ -355,8 +366,9 @@ final actor SSHSession {
   func openChannelSession(
     _id: SSHChannelID = SSHChannelID()
   ) throws(SSHError) -> SSHSessionChannel {
+    try requireOpenSession()
     guard let channel = ssh_channel_new(session) else {
-      throw SSHError.invalidState(message: "Failed to initialize SSH channel")
+      throw .invalidState(message: "Failed to initialize SSH channel")
     }
 
     try validate(
@@ -412,8 +424,9 @@ final actor SSHSession {
   // MARK: - SFTP Operations
 
   func sftp(id: SFTPClientID) throws(SSHError) -> sftp_session {
+    try requireOpenSession()
     guard let sftp = sftps[id] else {
-      throw SSHError.invalidState(message: "SFTP session \(id) not found")
+      throw .invalidState(message: "SFTP session \(id) not found")
     }
     return sftp
   }
@@ -428,6 +441,7 @@ final actor SSHSession {
   }
 
   func createSftp(_id: SFTPClientID = SFTPClientID()) throws(SSHError) -> SFTPClient {
+    try requireOpenSession()
     let sftp = try validate(
       sftp_new(session),
       mapError: channelOpenError(fallback: "Failed to initialize SFTP client")
@@ -536,7 +550,7 @@ final actor SSHSession {
         let attributes = sftp_lstat(sftp, dest)
       else { throw error }
       sftp_attributes_free(attributes)
-      throw SSHError.sftpError(.fileAlreadyExists, message: message)
+      throw .sftpError(.fileAlreadyExists, message: message)
     }
   }
 
@@ -561,8 +575,9 @@ final actor SSHSession {
   // MARK: - SFTP File
 
   func file(id: SFTPFileID) throws(SSHError) -> sftp_file {
+    try requireOpenSession()
     guard let trackedFile = files[id] else {
-      throw SSHError.invalidState(message: "File \(id) not found")
+      throw .invalidState(message: "File \(id) not found")
     }
     return trackedFile.file
   }
@@ -647,8 +662,9 @@ final actor SSHSession {
   // MARK: - SFTP Directory
 
   func directory(id: SFTPDirectoryID) throws(SSHError) -> sftp_dir {
+    try requireOpenSession()
     guard let dir = directories[id] else {
-      throw SSHError.invalidState(message: "Directory \(id) not found")
+      throw .invalidState(message: "Directory \(id) not found")
     }
     return dir
   }
@@ -701,8 +717,9 @@ final actor SSHSession {
     id: SFTPAioID,
     perform body: (UnsafeMutablePointer<sftp_aio?>) throws(SSHError) -> T
   ) throws(SSHError) -> T {
+    try requireOpenSession()
     guard let aio = files[id.fileId]?.aios.removeValue(forKey: id) else {
-      throw SSHError.invalidState(message: "AIO \(id) not found")
+      throw .invalidState(message: "AIO \(id) not found")
     }
     defer { freeAio(aio) }
     return try body(aio)
