@@ -515,7 +515,15 @@ final actor SSHSession {
 
   func symlink(id: SFTPClientID, target: String, dest: String) throws(SSHError) {
     let sftp = try sftp(id: id)
-    try validate(sftp_symlink(sftp, target, dest), sftp: sftp)
+    do {
+      try validate(sftp_symlink(sftp, target, dest), sftp: sftp)
+    } catch {
+      guard case .sftpError(.failure, let message) = error,
+        let attributes = sftp_lstat(sftp, dest)
+      else { throw error }
+      sftp_attributes_free(attributes)
+      throw SSHError.sftpError(.fileAlreadyExists, message: message)
+    }
   }
 
   private func limits(sftp: sftp_session, onFailure cleanup: () -> Void = {})
