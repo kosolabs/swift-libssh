@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.22.4](https://github.com/kosolabs/swift-libssh/compare/v1.22.3...v1.22.4) (2026-08-28)
+
+
+### Bug Fixes
+
+* report use of a closed session as a connection failure ([#182](https://github.com/kosolabs/swift-libssh/issues/182)) ([b88a7b7](https://github.com/kosolabs/swift-libssh/commit/b88a7b7797cb211c98057c273dd007808dfd6635))
+
 ## [1.22.3](https://github.com/kosolabs/swift-libssh/compare/v1.22.2...v1.22.3) (2026-08-28)
 
 
