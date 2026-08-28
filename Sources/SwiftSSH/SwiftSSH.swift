@@ -18,19 +18,40 @@ struct SSHConfig: ParsableArguments {
   @Argument(help: "The remote host to connect to")
   var host: String
 
-  func connect() async throws -> (ssh: SSHClient, sftp: SFTPClient) {
-    let ssh = try await SSHClient.connect(
+  func connect() async throws -> SSHClient {
+    try await SSHClient.connect(
       host: host, port: port, timeout: timeout, user: loginName,
       auth: .privateKey(contentsOf: URL(fileURLWithPath: identityFile))
     )
+  }
 
-    let sftp = try await ssh.sftp()
+  func connectWithSftp() async throws -> (ssh: SSHClient, sftp: SFTPClient) {
+    let ssh = try await connect()
+    do {
+      return (ssh, try await ssh.sftp())
+    } catch {
+      await ssh.close()
+      throw error
+    }
+  }
 
-    return (ssh, sftp)
+  /// A connection with no SFTP client of its own. Each SFTP client costs one of
+  /// the server's per-connection sessions (sshd `MaxSessions`, 10 by default), so
+  /// topologies that open their own must not be charged for one they never use.
+  func withSSHConnection<T>(_ body: (SSHClient) async throws -> T) async throws -> T {
+    let ssh = try await connect()
+    do {
+      let result = try await body(ssh)
+      await ssh.close()
+      return result
+    } catch {
+      await ssh.close()
+      throw error
+    }
   }
 
   func withConnection<T>(_ body: (SSHClient, SFTPClient) async throws -> T) async throws -> T {
-    let (ssh, sftp) = try await connect()
+    let (ssh, sftp) = try await connectWithSftp()
     do {
       let result = try await body(ssh, sftp)
       await sftp.close()
@@ -48,6 +69,6 @@ struct SSHConfig: ParsableArguments {
 struct SwiftSSH: AsyncParsableCommand {
   static let configuration = CommandConfiguration(
     abstract: "SwiftLibSSH CLI test tool",
-    subcommands: [Upload.self, Download.self, Stress.self]
+    subcommands: [Upload.self, Download.self, Stress.self, StressTree.self]
   )
 }
