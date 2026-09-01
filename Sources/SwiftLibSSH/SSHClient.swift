@@ -99,12 +99,6 @@ public struct SSHClient: Sendable {
     }
   }
 
-  func isConnectedOrThrow() async throws(SSHError) {
-    if await !isConnected {
-      throw SSHError.connectionFailed(message: "SSH session is closed")
-    }
-  }
-
   public func sftp() async throws(SSHError) -> SFTPClient {
     try await session.createSftp()
   }
@@ -136,9 +130,7 @@ public struct SSHClient: Sendable {
     _ command: String,
     perform body: @Sendable (SSHSessionChannel) async throws(SSHError) -> T
   ) async throws(SSHError) -> T {
-    try await isConnectedOrThrow()
-
-    return try await session.withSessionChannel { channel throws(SSHError) in
+    try await session.withSessionChannel { channel throws(SSHError) in
       try await channel.execute(command: command)
       return try await body(channel)
     }
@@ -148,9 +140,7 @@ public struct SSHClient: Sendable {
     _ command: String,
     perform body: @Sendable (SSHSessionChannel) async throws -> T
   ) async throws -> T {
-    try await isConnectedOrThrow()
-
-    return try await session.withSessionChannel { channel in
+    try await session.withSessionChannel { channel in
       try await channel.execute(command: command)
       return try await body(channel)
     }

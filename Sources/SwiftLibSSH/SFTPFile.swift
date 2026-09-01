@@ -210,11 +210,11 @@ public struct SFTPFile: Sendable {
   ) async throws {
     let bufferSize = limits.readLength(for: bufferSize)
     if !FileManager.default.createFile(atPath: localURL.path, contents: nil) {
-      throw SSHError.invalidState(message: "Failed to create local file at \(localURL)")
+      throw SSHError.localFileError(message: "Failed to create local file at \(localURL)")
     }
 
     guard let fp = try? FileHandle(forWritingTo: localURL) else {
-      throw SSHError.invalidState(message: "Failed to open local file for writing at \(localURL)")
+      throw SSHError.localFileError(message: "Failed to open local file for writing at \(localURL)")
     }
     defer { try? fp.close() }
 
@@ -232,7 +232,7 @@ public struct SFTPFile: Sendable {
   ) async throws {
     let bufferSize = Int(limits.writeLength(for: bufferSize))
     guard let fp = try? FileHandle(forReadingFrom: localURL) else {
-      throw SSHError.invalidState(message: "Failed to open local file for reading at \(localURL)")
+      throw SSHError.localFileError(message: "Failed to open local file for reading at \(localURL)")
     }
     defer { try? fp.close() }
 

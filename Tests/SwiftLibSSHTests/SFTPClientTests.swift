@@ -937,6 +937,47 @@ struct SFTPClientTests {
     }
   }
 
+  struct LocalFile {
+    @Test func uploadFromMissingLocalFileThrowsLocalFileError() async throws {
+      try await withAuthenticatedClient { ssh in
+        let srcURL = FileManager
+          .default
+          .temporaryDirectory
+          .appendingPathComponent("missing-\(UUID().uuidString).dat")
+        let destPath = "/tmp/missing-upload-\(UUID().uuidString).dat"
+
+        try await ssh.withSftp { sftp in
+          await #expect {
+            try await sftp.upload(from: srcURL, to: destPath)
+          } throws: { error in
+            (error as? SSHError)?.isLocalFileError == true
+          }
+        }
+
+        try await ssh.execute("rm -f \(destPath)")
+      }
+    }
+
+    @Test func downloadToUnwritableLocalPathThrowsLocalFileError() async throws {
+      try await withAuthenticatedClient { ssh in
+        let srcPath = "/tmp/download-source-\(UUID().uuidString).dat"
+        let destURL = URL(fileURLWithPath: "/tmp/no-such-directory-\(UUID().uuidString)/out.dat")
+
+        try await ssh.execute("echo hello > \(srcPath)")
+
+        try await ssh.withSftp { sftp in
+          await #expect {
+            try await sftp.download(from: srcPath, to: destURL)
+          } throws: { error in
+            (error as? SSHError)?.isLocalFileError == true
+          }
+        }
+
+        try await ssh.execute("rm -f \(srcPath)")
+      }
+    }
+  }
+
   struct Lifecycle {
 
     @Test func sftpCloseAfterSessionCloseSucceeds() async throws {
@@ -947,7 +988,7 @@ struct SFTPClientTests {
       await sftp.close()
     }
 
-    @Test func sftpOperationAfterCloseThrowsConnectionFailed() async throws {
+    @Test func sftpOperationAfterCloseThrowsClosed() async throws {
       let ssh = try await client()
       let sftp = try await ssh.sftp()
 
@@ -956,33 +997,35 @@ struct SFTPClientTests {
       await #expect {
         _ = try await sftp.attributes(at: "/tmp")
       } throws: { error in
-        (error as? SSHError)?.isConnectionFailed == true
+        (error as? SSHError)?.isClosed == true
       }
     }
 
-    @Test func openingSftpAfterCloseThrowsConnectionFailed() async throws {
+    @Test func openingSftpAfterCloseThrowsClosed() async throws {
       let ssh = try await client()
       await ssh.close()
 
       await #expect {
         _ = try await ssh.sftp()
       } throws: { error in
-        (error as? SSHError)?.isConnectionFailed == true
+        (error as? SSHError)?.isClosed == true
       }
     }
 
-    @Test func sftpOperationAfterSftpCloseThrows() async throws {
+    @Test func sftpOperationAfterSftpCloseThrowsClosed() async throws {
       try await withAuthenticatedClient { ssh in
         let sftp = try await ssh.sftp()
         await sftp.close()
 
-        await #expect(throws: SSHError.self) {
+        await #expect {
           _ = try await sftp.attributes(at: "/tmp")
+        } throws: { error in
+          (error as? SSHError)?.isClosed == true
         }
       }
     }
 
-    @Test func openDirectoryAfterSftpCloseThrowsInvalidState() async throws {
+    @Test func openDirectoryAfterSftpCloseThrowsClosed() async throws {
       try await withAuthenticatedClient { ssh in
         let sftp = try await ssh.sftp()
 
@@ -995,7 +1038,7 @@ struct SFTPClientTests {
           await #expect {
             _ = try await iterator.next()
           } throws: { error in
-            (error as? SSHError)?.isInvalidState == true
+            (error as? SSHError)?.isClosed == true
           }
         }
       }

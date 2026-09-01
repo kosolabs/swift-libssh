@@ -433,7 +433,7 @@ struct SFTPFileTests {
   }
 
   struct Lifecycle {
-    @Test func sftpFileOperationAfterCloseThrowsConnectionFailed() async throws {
+    @Test func sftpFileOperationAfterCloseThrowsClosed() async throws {
       let ssh = try await client()
       let sftp = try await ssh.sftp()
       let path = "/tmp/swift-libssh-lifecycle-\(UUID().uuidString)"
@@ -446,14 +446,14 @@ struct SFTPFileTests {
         await #expect {
           _ = try await file.attributes()
         } throws: { error in
-          (error as? SSHError)?.isConnectionFailed == true
+          (error as? SSHError)?.isClosed == true
         }
       }
 
       try? FileManager.default.removeItem(atPath: path)
     }
 
-    @Test func sftpFileOperationAfterSftpCloseThrowsInvalidState() async throws {
+    @Test func sftpFileOperationAfterSftpCloseThrowsClosed() async throws {
       let ssh = try await client()
       let sftp = try await ssh.sftp()
       let path = "/tmp/swift-libssh-lifecycle-\(UUID().uuidString)"
@@ -466,7 +466,7 @@ struct SFTPFileTests {
         await #expect {
           _ = try await file.attributes()
         } throws: { error in
-          (error as? SSHError)?.isInvalidState == true
+          (error as? SSHError)?.isClosed == true
         }
       }
 
