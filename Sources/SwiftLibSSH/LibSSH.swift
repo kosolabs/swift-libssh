@@ -53,6 +53,7 @@ struct SFTPFileID: Hashable, Sendable {
 }
 
 struct SFTPDirectoryID: Hashable, Sendable {
+  let sftpId: SFTPClientID
   let uuid = UUID()
 }
 
@@ -454,6 +455,8 @@ final actor SSHSession {
 
   func freeSftp(id: SFTPClientID) {
     guard let sftp = sftps.removeValue(forKey: id) else { return }
+    for fileId in files.keys.filter({ $0.sftpId == id }) { closeFile(id: fileId) }
+    for dirId in directories.keys.filter({ $0.sftpId == id }) { closeDirectory(id: dirId) }
     sftp_free(sftp)
   }
 
@@ -673,7 +676,7 @@ final actor SSHSession {
     id: SFTPClientID, path: String,
     perform: @Sendable (SFTPDirectory) async throws -> T
   ) async throws -> T {
-    let _id = SFTPDirectoryID()
+    let _id = SFTPDirectoryID(sftpId: id)
     let dir = try openDirectory(_id: _id, id: id, path: path)
     defer { closeDirectory(id: _id) }
     return try await perform(dir)
@@ -686,7 +689,7 @@ final actor SSHSession {
     let sftp = try sftp(id: id)
     let dir = try validate(sftp_opendir(sftp, path), sftp: sftp)
     directories[_id] = dir
-    return SFTPDirectory(session: self, sftpId: id, directoryId: _id)
+    return SFTPDirectory(session: self, id: _id)
   }
 
   func closeDirectory(id: SFTPDirectoryID) {
@@ -694,11 +697,9 @@ final actor SSHSession {
     sftp_closedir(dir)
   }
 
-  func readDirectory(
-    sftpId: SFTPClientID, directoryId: SFTPDirectoryID
-  ) throws(SSHError) -> SFTPAttributes? {
-    let sftp = try sftp(id: sftpId)
-    let dir = try directory(id: directoryId)
+  func readDirectory(id: SFTPDirectoryID) throws(SSHError) -> SFTPAttributes? {
+    let sftp = try sftp(id: id.sftpId)
+    let dir = try directory(id: id)
     guard let attributes = sftp_readdir(sftp, dir) else {
       return nil
     }

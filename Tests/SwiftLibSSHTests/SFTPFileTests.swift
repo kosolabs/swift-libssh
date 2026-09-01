@@ -452,5 +452,26 @@ struct SFTPFileTests {
 
       try? FileManager.default.removeItem(atPath: path)
     }
+
+    @Test func sftpFileOperationAfterSftpCloseThrowsInvalidState() async throws {
+      let ssh = try await client()
+      let sftp = try await ssh.sftp()
+      let path = "/tmp/swift-libssh-lifecycle-\(UUID().uuidString)"
+
+      try await sftp.withSftpFile(at: path, accessType: .writeOnly) { file in
+        try await file.write(data: Data("hello".utf8))
+
+        await sftp.close()
+
+        await #expect {
+          _ = try await file.attributes()
+        } throws: { error in
+          (error as? SSHError)?.isInvalidState == true
+        }
+      }
+
+      await ssh.close()
+      try? FileManager.default.removeItem(atPath: path)
+    }
   }
 }
