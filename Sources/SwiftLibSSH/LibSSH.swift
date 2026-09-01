@@ -109,10 +109,12 @@ public enum SSHKeyError: Codable, Error, Sendable, Equatable {
 
 public enum SSHError: Codable, Error, Sendable, Equatable {
   case connectionFailed(message: String)
+  case closed(message: String)
   case authenticationFailed(message: String)
   case keyError(SSHKeyError, message: String)
   case sftpError(SFTPError, message: String)
   case channelOpenFailed(message: String)
+  case localFileError(message: String)
   case libraryError(code: Int32, message: String)
   case invalidState(message: String)
 
@@ -129,6 +131,11 @@ public enum SSHError: Codable, Error, Sendable, Equatable {
 
   public var isConnectionFailed: Bool {
     if case .connectionFailed = self { return true }
+    return false
+  }
+
+  public var isClosed: Bool {
+    if case .closed = self { return true }
     return false
   }
 
@@ -149,6 +156,11 @@ public enum SSHError: Codable, Error, Sendable, Equatable {
 
   public var isChannelOpenFailed: Bool {
     if case .channelOpenFailed = self { return true }
+    return false
+  }
+
+  public var isLocalFileError: Bool {
+    if case .localFileError = self { return true }
     return false
   }
 
@@ -219,7 +231,14 @@ final actor SSHSession {
 
   private func requireOpenSession() throws(SSHError) {
     if session == nil {
-      throw .connectionFailed(message: "SSH session is closed")
+      throw .closed(message: "SSH session is closed")
+    }
+  }
+
+  func requireConnected() throws(SSHError) {
+    try requireOpenSession()
+    if !isConnected {
+      throw .connectionFailed(message: "SSH session is not connected")
     }
   }
 
@@ -236,7 +255,7 @@ final actor SSHSession {
     mapError: ErrorMapper = { _, _ in nil }
   ) -> SSHError {
     if session == nil {
-      return .connectionFailed(message: "SSH session is closed")
+      return .closed(message: "SSH session is closed")
     }
 
     let message = getErrorMessage()
@@ -341,7 +360,7 @@ final actor SSHSession {
   private func channel(id: SSHChannelID) throws(SSHError) -> ssh_channel {
     try requireOpenSession()
     guard let channel = channels[id] else {
-      throw .invalidState(message: "Channel \(id) not found")
+      throw .closed(message: "SSH channel is closed")
     }
     return channel
   }
@@ -367,7 +386,7 @@ final actor SSHSession {
   func openChannelSession(
     _id: SSHChannelID = SSHChannelID()
   ) throws(SSHError) -> SSHSessionChannel {
-    try requireOpenSession()
+    try requireConnected()
     guard let channel = ssh_channel_new(session) else {
       throw .invalidState(message: "Failed to initialize SSH channel")
     }
@@ -427,7 +446,7 @@ final actor SSHSession {
   func sftp(id: SFTPClientID) throws(SSHError) -> sftp_session {
     try requireOpenSession()
     guard let sftp = sftps[id] else {
-      throw .invalidState(message: "SFTP session \(id) not found")
+      throw .closed(message: "SFTP session is closed")
     }
     return sftp
   }
@@ -442,7 +461,7 @@ final actor SSHSession {
   }
 
   func createSftp(_id: SFTPClientID = SFTPClientID()) throws(SSHError) -> SFTPClient {
-    try requireOpenSession()
+    try requireConnected()
     let sftp = try validate(
       sftp_new(session),
       mapError: channelOpenError(fallback: "Failed to initialize SFTP client")
@@ -580,7 +599,7 @@ final actor SSHSession {
   func file(id: SFTPFileID) throws(SSHError) -> sftp_file {
     try requireOpenSession()
     guard let trackedFile = files[id] else {
-      throw .invalidState(message: "File \(id) not found")
+      throw .closed(message: "SFTP file is closed")
     }
     return trackedFile.file
   }
@@ -667,7 +686,7 @@ final actor SSHSession {
   func directory(id: SFTPDirectoryID) throws(SSHError) -> sftp_dir {
     try requireOpenSession()
     guard let dir = directories[id] else {
-      throw .invalidState(message: "Directory \(id) not found")
+      throw .closed(message: "SFTP directory is closed")
     }
     return dir
   }
@@ -720,7 +739,7 @@ final actor SSHSession {
   ) throws(SSHError) -> T {
     try requireOpenSession()
     guard let aio = files[id.fileId]?.aios.removeValue(forKey: id) else {
-      throw .invalidState(message: "AIO \(id) not found")
+      throw .closed(message: "SFTP file is closed")
     }
     defer { freeAio(aio) }
     return try body(aio)

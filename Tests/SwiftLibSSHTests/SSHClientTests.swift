@@ -96,7 +96,7 @@ struct SSHClientTests {
       }
     }
 
-    @Test func executeAfterCloseThrowsConnectionFailed() async throws {
+    @Test func executeAfterCloseThrowsClosed() async throws {
       let ssh = try await client()
 
       await ssh.close()
@@ -104,7 +104,7 @@ struct SSHClientTests {
       await #expect {
         try await ssh.execute("whoami")
       } throws: { error in
-        (error as? SSHError)?.isConnectionFailed == true
+        (error as? SSHError)?.isClosed == true
       }
     }
   }
@@ -182,14 +182,14 @@ struct SSHClientTests {
     }
   }
 
-  @Test func executeAfterCloseThrowsConnectionFailed() async throws {
+  @Test func executeAfterCloseThrowsClosed() async throws {
     let ssh = try await client()
     await ssh.close()
 
     await #expect {
       _ = try await ssh.execute("whoami")
     } throws: { error in
-      (error as? SSHError)?.isConnectionFailed == true
+      (error as? SSHError)?.isClosed == true
     }
   }
 }
