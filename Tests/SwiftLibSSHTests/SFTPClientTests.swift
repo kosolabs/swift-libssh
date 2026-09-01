@@ -981,5 +981,24 @@ struct SFTPClientTests {
         }
       }
     }
+
+    @Test func openDirectoryAfterSftpCloseThrowsInvalidState() async throws {
+      try await withAuthenticatedClient { ssh in
+        let sftp = try await ssh.sftp()
+
+        try await sftp.withDirectory(at: "/tmp") { directory in
+          var iterator = directory.makeAsyncIterator()
+          _ = try await iterator.next()
+
+          await sftp.close()
+
+          await #expect {
+            _ = try await iterator.next()
+          } throws: { error in
+            (error as? SSHError)?.isInvalidState == true
+          }
+        }
+      }
+    }
   }
 }

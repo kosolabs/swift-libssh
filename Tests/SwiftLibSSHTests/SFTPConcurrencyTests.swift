@@ -144,4 +144,42 @@ struct SFTPConcurrencyTests {
       }
     }
   }
+
+  @Test func closingSftpClientDuringDownloadSucceeds() async throws {
+    let remoteSource = "/tmp/close-during-download.dat"
+    let localDownload = URL(fileURLWithPath: NSTemporaryDirectory())
+      .appendingPathComponent("close-during-download.dat")
+    defer { try? FileManager.default.removeItem(at: localDownload) }
+
+    try await withWatchdog {
+      try await withAuthenticatedClient { ssh in
+        try await ssh.execute("dd if=/dev/urandom of=\(remoteSource) bs=1M count=64")
+
+        for _ in 0..<5 {
+          let sftp = try await ssh.sftp()
+          let started = Latch()
+
+          await withTaskGroup(of: Void.self) { group in
+            group.addTask {
+              try? await sftp.download(from: remoteSource, to: localDownload) { count in
+                if count > 0 { started.signal() }
+              }
+            }
+
+            group.addTask {
+              while !started.isSet {
+                await Task.yield()
+              }
+              await sftp.close()
+            }
+          }
+        }
+
+        let result = try await ssh.execute("echo alive")
+        #expect(try result.stdout.decoded(as: .utf8) == "alive\n")
+
+        try await ssh.execute("rm -f \(remoteSource)")
+      }
+    }
+  }
 }

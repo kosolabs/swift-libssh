@@ -2,21 +2,16 @@ import Foundation
 
 public struct SFTPDirectory: Sendable, AsyncSequence {
   private let session: SSHSession
-  private let sftpId: SFTPClientID
-  private let directoryId: SFTPDirectoryID
+  private let id: SFTPDirectoryID
 
-  init(session: SSHSession, sftpId: SFTPClientID, directoryId: SFTPDirectoryID) {
+  init(session: SSHSession, id: SFTPDirectoryID) {
     self.session = session
-    self.sftpId = sftpId
-    self.directoryId = directoryId
+    self.id = id
   }
 
   func read() async throws(SSHError) -> SFTPAttributes? {
     while true {
-      guard
-        let attrs = try await session.readDirectory(
-          sftpId: sftpId, directoryId: directoryId)
-      else {
+      guard let attrs = try await session.readDirectory(id: id) else {
         return nil
       }
 
