@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.23.0](https://github.com/kosolabs/swift-libssh/compare/v1.22.4...v1.23.0) (2026-09-01)
+
+
+### Features
+
+* distinguish closed handles from connection failures ([#186](https://github.com/kosolabs/swift-libssh/issues/186)) ([5930e89](https://github.com/kosolabs/swift-libssh/commit/5930e89ee1c23a7e963f8181a8d9dfc181b0e646))
+
+
+### Bug Fixes
+
+* use-after-free when closing an sftp client with open handles ([#184](https://github.com/kosolabs/swift-libssh/issues/184)) ([995feff](https://github.com/kosolabs/swift-libssh/commit/995feffdb9535a4e163121ecfd5ea69a840c5ce2))
+
 ## [1.22.4](https://github.com/kosolabs/swift-libssh/compare/v1.22.3...v1.22.4) (2026-08-28)
 
 
