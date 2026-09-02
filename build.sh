@@ -1,6 +1,6 @@
 #!/bin/bash
 
-export OPENSSL=openssl-4.0.1   # https://github.com/openssl/openssl/releases
+export OPENSSL=openssl-4.0.2   # https://github.com/openssl/openssl/releases
 export LIBSSH=libssh-0.12.2    # https://www.libssh.org/files/
 export MACOSX_DEPLOYMENT_TARGET=15.0
 
