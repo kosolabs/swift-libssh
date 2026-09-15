@@ -259,6 +259,11 @@ final actor SSHSession {
     }
 
     let message = getErrorMessage()
+    let code = getErrorCode()
+
+    if code == Int32(SSH_FATAL.rawValue) {
+      return .connectionFailed(message: message)
+    }
 
     if let sftp = sftp {
       let sftpCode = sftp_get_error(sftp)
@@ -267,7 +272,6 @@ final actor SSHSession {
       }
     }
 
-    let code = getErrorCode()
     if code == 0 && message.isEmpty && !isConnected {
       return .connectionFailed(message: "Connection lost")
     }
@@ -720,6 +724,9 @@ final actor SSHSession {
     let sftp = try sftp(id: id.sftpId)
     let dir = try directory(id: id)
     guard let attributes = sftp_readdir(sftp, dir) else {
+      guard sftp_dir_eof(dir) != 0 else {
+        throw error(sftp: sftp)
+      }
       return nil
     }
     defer { sftp_attributes_free(attributes) }

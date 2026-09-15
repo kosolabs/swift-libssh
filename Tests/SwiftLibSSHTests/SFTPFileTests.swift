@@ -453,6 +453,28 @@ struct SFTPFileTests {
       try? FileManager.default.removeItem(atPath: path)
     }
 
+    @Test func sftpFileOperationAfterConnectionDropThrowsConnectionFailed() async throws {
+      let ssh = try await client()
+      let sftp = try await ssh.sftp()
+      let path = "/tmp/swift-libssh-lifecycle-\(UUID().uuidString)"
+
+      try await sftp.withSftpFile(at: path, accessType: .readWrite) { file in
+        try await file.write(data: Data("hello".utf8))
+
+        await ssh.dropConnection()
+
+        await #expect {
+          _ = try await file.read()
+        } throws: { error in
+          (error as? SSHError)?.isConnectionFailed == true
+        }
+      }
+
+      await sftp.close()
+      await ssh.close()
+      try? FileManager.default.removeItem(atPath: path)
+    }
+
     @Test func sftpFileOperationAfterSftpCloseThrowsClosed() async throws {
       let ssh = try await client()
       let sftp = try await ssh.sftp()

@@ -55,6 +55,10 @@ extension Data {
 }
 
 extension SSHClient {
+  func dropConnection() async {
+    _ = try? await execute("kill -9 $PPID")
+  }
+
   func md5(
     ofFile path: String, offset: UInt64 = 0, length: UInt64 = UInt64(UInt32.max)
   ) async throws -> String {
