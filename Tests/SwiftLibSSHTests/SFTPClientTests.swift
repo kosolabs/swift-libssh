@@ -988,6 +988,59 @@ struct SFTPClientTests {
       await sftp.close()
     }
 
+    @Test func sftpOperationAfterConnectionDropThrowsConnectionFailed() async throws {
+      let ssh = try await client()
+      let sftp = try await ssh.sftp()
+
+      await ssh.dropConnection()
+
+      await #expect {
+        _ = try await sftp.attributes(at: "/tmp")
+      } throws: { error in
+        (error as? SSHError)?.isConnectionFailed == true
+      }
+
+      await sftp.close()
+      await ssh.close()
+    }
+
+    @Test func iterateDirectoryAfterConnectionDropThrowsConnectionFailed() async throws {
+      let ssh = try await client()
+      let sftp = try await ssh.sftp()
+      let path = "/tmp/swift-libssh-lifecycle-\(UUID().uuidString)"
+
+      try await ssh.execute("mkdir -p \(path) && touch \(path)/{1..500}")
+
+      try await sftp.withDirectory(at: path) { directory in
+        let iterator = directory.makeAsyncIterator()
+        _ = try await iterator.next()
+
+        await ssh.dropConnection()
+
+        await #expect {
+          while try await iterator.next() != nil {}
+        } throws: { error in
+          (error as? SSHError)?.isConnectionFailed == true
+        }
+      }
+
+      await sftp.close()
+      await ssh.close()
+      try? FileManager.default.removeItem(atPath: path)
+    }
+
+    @Test func closeAfterConnectionDropSucceeds() async throws {
+      let ssh = try await client()
+      let sftp = try await ssh.sftp()
+
+      await ssh.dropConnection()
+
+      await sftp.close()
+      await ssh.close()
+
+      #expect(!(await ssh.isConnected))
+    }
+
     @Test func sftpOperationAfterCloseThrowsClosed() async throws {
       let ssh = try await client()
       let sftp = try await ssh.sftp()
@@ -1030,7 +1083,7 @@ struct SFTPClientTests {
         let sftp = try await ssh.sftp()
 
         try await sftp.withDirectory(at: "/tmp") { directory in
-          var iterator = directory.makeAsyncIterator()
+          let iterator = directory.makeAsyncIterator()
           _ = try await iterator.next()
 
           await sftp.close()
