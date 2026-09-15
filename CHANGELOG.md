@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.23.1](https://github.com/kosolabs/swift-libssh/compare/v1.23.0...v1.23.1) (2026-09-15)
+
+
+### Bug Fixes
+
+* report transport failures as connectionFailed instead of sftpError(.failure) ([#189](https://github.com/kosolabs/swift-libssh/issues/189)) ([154f41c](https://github.com/kosolabs/swift-libssh/commit/154f41c78bc2120a5a43ab0e88da7c2c1fd068e3))
+
 ## [1.23.0](https://github.com/kosolabs/swift-libssh/compare/v1.22.4...v1.23.0) (2026-09-01)
 
 
