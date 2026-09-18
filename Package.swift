@@ -16,21 +16,9 @@ let package = Package(
     .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.8.2")
   ],
   targets: [
-    .target(
+    .binaryTarget(
       name: "CLibSSH",
-      path: "Sources/CLibSSH",
-      publicHeadersPath: "include",
-      cSettings: [
-        .headerSearchPath("include")
-      ],
-      linkerSettings: [
-        .unsafeFlags([
-          "-L\(Context.packageDirectory)/Sources/CLibSSH/lib",
-          "-lssh",
-          "-lssl",
-          "-lcrypto",
-        ])
-      ]
+      path: "Sources/CLibSSH.xcframework"
     ),
     .target(
       name: "SwiftLibSSH",
