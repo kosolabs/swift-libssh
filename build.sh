@@ -64,9 +64,6 @@ lipo -create \
   $BUILD/install/openssl-x86_64/lib/libcrypto.a \
   -output $BUILD/install/openssl-universal/lib/libcrypto.a
 
-cp -R $BUILD/install/openssl-arm64/include/openssl \
-      $BUILD/install/openssl-universal/include/
-
 # Fetch libssh
 
 cd $BUILD/src
@@ -126,36 +123,28 @@ lipo -create \
   $BUILD/install/libssh-x86_64/lib/libssh.a \
   -output $BUILD/install/libssh-universal/lib/libssh.a
 
-cp -R $BUILD/install/libssh-arm64/include/libssh \
-      $BUILD/install/libssh-universal/include/
-
 # Package as CLibSSH.xcframework
-#
-# SwiftPM allows one library per binary target, so libssh and OpenSSL are
-# merged into a single static archive before wrapping it.
 
-cd $BUILD/../..
-
-STAGE=$BUILD/install/clibssh
-mkdir -p $STAGE/include/libssh
-
-libtool -static -o $STAGE/libCLibSSH.a \
+libtool -static -o $BUILD/install/libCLibSSH.a \
   $BUILD/install/libssh-universal/lib/libssh.a \
   $BUILD/install/openssl-universal/lib/libssl.a \
   $BUILD/install/openssl-universal/lib/libcrypto.a
 
-cp $BUILD/install/libssh-universal/include/libssh/*.h $STAGE/include/libssh/
-cat > $STAGE/include/module.modulemap <<EOF
+mkdir -p $BUILD/install/include/libssh
+cp $BUILD/install/libssh-arm64/include/libssh/*.h $BUILD/install/include/libssh/
+cat > $BUILD/install/include/module.modulemap <<EOF
 module CLibSSH {
   umbrella "libssh"
   export *
 }
 EOF
 
+cd $BUILD/../..
+
 rm -rf Sources/CLibSSH.xcframework
 xcodebuild -create-xcframework \
-  -library $STAGE/libCLibSSH.a \
-  -headers $STAGE/include \
+  -library $BUILD/install/libCLibSSH.a \
+  -headers $BUILD/install/include \
   -output Sources/CLibSSH.xcframework
 
 echo "✅ Built CLibSSH.xcframework with OpenSSL $OPENSSL and libssh $LIBSSH"
