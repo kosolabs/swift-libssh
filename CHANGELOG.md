@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.23.2](https://github.com/kosolabs/swift-libssh/compare/v1.23.1...v1.23.2) (2026-09-18)
+
+
+### Bug Fixes
+
+* ship CLibSSH as an XCFramework binary target instead of unsafeFlags ([#191](https://github.com/kosolabs/swift-libssh/issues/191)) ([f94ad32](https://github.com/kosolabs/swift-libssh/commit/f94ad329297387149056ee81c05127b7b0e2124f))
+
 ## [1.23.1](https://github.com/kosolabs/swift-libssh/compare/v1.23.0...v1.23.1) (2026-09-15)
 
 
