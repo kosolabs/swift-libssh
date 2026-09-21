@@ -493,9 +493,12 @@ final actor SSHSession {
     try validate(sftp_rmdir(sftp, path), sftp: sftp)
   }
 
-  func stat(id: SFTPClientID, path: String) throws(SSHError) -> SFTPAttributes {
+  func stat(
+    id: SFTPClientID, path: String, followSymlinks: Bool = true
+  ) throws(SSHError) -> SFTPAttributes {
     let sftp = try sftp(id: id)
-    let attributes = try validate(sftp_stat(sftp, path), sftp: sftp)
+    let attributes = try validate(
+      followSymlinks ? sftp_stat(sftp, path) : sftp_lstat(sftp, path), sftp: sftp)
     defer { sftp_attributes_free(attributes) }
     return SFTPAttributes.from(raw: attributes.pointee)
   }
@@ -503,6 +506,7 @@ final actor SSHSession {
   func setStat(
     id: SFTPClientID,
     path: String,
+    followSymlinks: Bool = true,
     size: UInt64? = nil,
     uid: UInt32? = nil,
     gid: UInt32? = nil,
@@ -511,7 +515,8 @@ final actor SSHSession {
     modifyTime: Date? = nil
   ) throws(SSHError) {
     let sftp = try sftp(id: id)
-    let attributes = try validate(sftp_stat(sftp, path), sftp: sftp)
+    let attributes = try validate(
+      followSymlinks ? sftp_stat(sftp, path) : sftp_lstat(sftp, path), sftp: sftp)
     defer { sftp_attributes_free(attributes) }
 
     var flags: UInt32 = 0
@@ -550,14 +555,11 @@ final actor SSHSession {
     }
 
     attributes.pointee.flags = flags
-    try validate(sftp_setstat(sftp, path, attributes), sftp: sftp)
-  }
-
-  func lstat(id: SFTPClientID, path: String) throws(SSHError) -> SFTPAttributes {
-    let sftp = try sftp(id: id)
-    let attributes = try validate(sftp_lstat(sftp, path), sftp: sftp)
-    defer { sftp_attributes_free(attributes) }
-    return SFTPAttributes.from(raw: attributes.pointee)
+    if followSymlinks {
+      try validate(sftp_setstat(sftp, path, attributes), sftp: sftp)
+    } else {
+      try validate(sftp_lsetstat(sftp, path, attributes), sftp: sftp)
+    }
   }
 
   func readlink(id: SFTPClientID, path: String) throws(SSHError) -> String {
