@@ -62,15 +62,12 @@ public struct SFTPClient: Sendable {
   public func attributes(
     at path: String, followSymlinks: Bool = true
   ) async throws(SSHError) -> SFTPAttributes {
-    if followSymlinks {
-      try await session.stat(id: id, path: path)
-    } else {
-      try await session.lstat(id: id, path: path)
-    }
+    try await session.stat(id: id, path: path, followSymlinks: followSymlinks)
   }
 
   public func setAttributes(
     at path: String,
+    followSymlinks: Bool = true,
     size: UInt64? = nil,
     uid: UInt32? = nil,
     gid: UInt32? = nil,
@@ -81,6 +78,7 @@ public struct SFTPClient: Sendable {
     try await session.setStat(
       id: id,
       path: path,
+      followSymlinks: followSymlinks,
       size: size,
       uid: uid,
       gid: gid,

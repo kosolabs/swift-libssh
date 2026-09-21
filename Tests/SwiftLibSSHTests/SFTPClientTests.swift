@@ -244,6 +244,158 @@ struct SFTPClientTests {
         #expect(after.accessTime == before.accessTime)
       }
     }
+
+    @Test func setModifyTimeOnSymlinkFollowsSymlinkByDefault() async throws {
+      try await withAuthenticatedClient { ssh in
+        let target = "/tmp/sftp-setattr-follow-target.txt"
+        let link = "/tmp/sftp-setattr-follow-link.txt"
+        try await ssh.execute("touch \(target) && rm -f \(link) && ln -s \(target) \(link)")
+
+        let linkBefore = try await ssh.withSftp { sftp in
+          try await sftp.attributes(at: link, followSymlinks: false)
+        }
+
+        let targetDate = Date(timeIntervalSince1970: 1_000_000)
+
+        try await ssh.withSftp { sftp in
+          try await sftp.setAttributes(at: link, modifyTime: targetDate)
+        }
+
+        let (targetAfter, linkAfter) = try await ssh.withSftp { sftp in
+          (
+            try await sftp.attributes(at: target),
+            try await sftp.attributes(at: link, followSymlinks: false)
+          )
+        }
+
+        #expect(targetAfter.modifyTime?.timeIntervalSince1970 == targetDate.timeIntervalSince1970)
+        #expect(linkAfter.modifyTime == linkBefore.modifyTime)
+      }
+    }
+
+    @Test func setModifyTimeOnSymlinkSucceeds() async throws {
+      try await withAuthenticatedClient { ssh in
+        let target = "/tmp/sftp-setattr-lmtime-target.txt"
+        let link = "/tmp/sftp-setattr-lmtime-link.txt"
+        try await ssh.execute("touch \(target) && rm -f \(link) && ln -s \(target) \(link)")
+
+        let (targetBefore, linkBefore) = try await ssh.withSftp { sftp in
+          (
+            try await sftp.attributes(at: target),
+            try await sftp.attributes(at: link, followSymlinks: false)
+          )
+        }
+
+        let targetDate = Date(timeIntervalSince1970: 1_000_000)
+
+        try await ssh.withSftp { sftp in
+          try await sftp.setAttributes(at: link, followSymlinks: false, modifyTime: targetDate)
+        }
+
+        let (targetAfter, linkAfter) = try await ssh.withSftp { sftp in
+          (
+            try await sftp.attributes(at: target),
+            try await sftp.attributes(at: link, followSymlinks: false)
+          )
+        }
+
+        #expect(linkAfter.type == .symlink)
+        #expect(linkAfter.modifyTime?.timeIntervalSince1970 == targetDate.timeIntervalSince1970)
+        // The link's other attributes are unchanged, including atime: the
+        // baseline must come from lstat, not from the target.
+        #expect(linkAfter.accessTime == linkBefore.accessTime)
+        #expect(linkAfter.uid == linkBefore.uid)
+        #expect(linkAfter.gid == linkBefore.gid)
+        #expect((linkAfter.permissions! & 0o777) == (linkBefore.permissions! & 0o777))
+        // Target untouched
+        #expect(targetAfter.modifyTime == targetBefore.modifyTime)
+        #expect(targetAfter.accessTime == targetBefore.accessTime)
+      }
+    }
+
+    @Test func setAccessTimeOnSymlinkSucceeds() async throws {
+      try await withAuthenticatedClient { ssh in
+        let target = "/tmp/sftp-setattr-latime-target.txt"
+        let link = "/tmp/sftp-setattr-latime-link.txt"
+        try await ssh.execute("touch \(target) && rm -f \(link) && ln -s \(target) \(link)")
+
+        let (targetBefore, linkBefore) = try await ssh.withSftp { sftp in
+          (
+            try await sftp.attributes(at: target),
+            try await sftp.attributes(at: link, followSymlinks: false)
+          )
+        }
+
+        let targetDate = Date(timeIntervalSince1970: 1_000_000)
+
+        try await ssh.withSftp { sftp in
+          try await sftp.setAttributes(at: link, followSymlinks: false, accessTime: targetDate)
+        }
+
+        let (targetAfter, linkAfter) = try await ssh.withSftp { sftp in
+          (
+            try await sftp.attributes(at: target),
+            try await sftp.attributes(at: link, followSymlinks: false)
+          )
+        }
+
+        #expect(linkAfter.type == .symlink)
+        #expect(linkAfter.accessTime?.timeIntervalSince1970 == targetDate.timeIntervalSince1970)
+        #expect(linkAfter.modifyTime == linkBefore.modifyTime)
+        // Target untouched
+        #expect(targetAfter.modifyTime == targetBefore.modifyTime)
+        #expect(targetAfter.accessTime == targetBefore.accessTime)
+      }
+    }
+
+    @Test func setPermissionsOnSymlinkSucceeds() async throws {
+      try await withAuthenticatedClient { ssh in
+        let target = "/tmp/sftp-setattr-lperm-target.txt"
+        let link = "/tmp/sftp-setattr-lperm-link.txt"
+        try await ssh.execute(
+          "touch \(target) && chmod 0644 \(target) && rm -f \(link) && ln -s \(target) \(link)")
+
+        let linkBefore = try await ssh.withSftp { sftp in
+          try await sftp.attributes(at: link, followSymlinks: false)
+        }
+        #expect((linkBefore.permissions! & 0o777) != 0o600)
+
+        // OpenSSH implements this with fchmodat(AT_SYMLINK_NOFOLLOW), which
+        // macOS/BSD honor. Linux servers reject it with .opUnsupported.
+        try await ssh.withSftp { sftp in
+          try await sftp.setAttributes(at: link, followSymlinks: false, permissions: 0o600)
+        }
+
+        let (targetAfter, linkAfter) = try await ssh.withSftp { sftp in
+          (
+            try await sftp.attributes(at: target),
+            try await sftp.attributes(at: link, followSymlinks: false)
+          )
+        }
+
+        #expect(linkAfter.type == .symlink)
+        #expect((linkAfter.permissions! & 0o777) == 0o600)
+        #expect(linkAfter.modifyTime == linkBefore.modifyTime)
+        #expect(linkAfter.accessTime == linkBefore.accessTime)
+        // Target untouched
+        #expect((targetAfter.permissions! & 0o777) == 0o644)
+      }
+    }
+
+    @Test func setSizeOnSymlinkThrowsBadMessage() async throws {
+      await #expect {
+        try await withAuthenticatedClient { ssh in
+          let target = "/tmp/sftp-setattr-lsize-target.txt"
+          let link = "/tmp/sftp-setattr-lsize-link.txt"
+          try await ssh.execute("touch \(target) && rm -f \(link) && ln -s \(target) \(link)")
+          try await ssh.withSftp { sftp in
+            try await sftp.setAttributes(at: link, followSymlinks: false, size: 0)
+          }
+        }
+      } throws: { error in
+        (error as? SSHError)?.sftpError == .badMessage
+      }
+    }
   }
 
   struct CreateDirectory {
