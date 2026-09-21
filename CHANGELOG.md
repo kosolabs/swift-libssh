@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.24.0](https://github.com/kosolabs/swift-libssh/compare/v1.23.2...v1.24.0) (2026-09-21)
+
+
+### Features
+
+* add followSymlinks option to setAttributes for setting symlink times ([#194](https://github.com/kosolabs/swift-libssh/issues/194)) ([44b1087](https://github.com/kosolabs/swift-libssh/commit/44b10877f36ff398b131273aa35f92a9a8789f4a))
+
 ## [1.23.2](https://github.com/kosolabs/swift-libssh/compare/v1.23.1...v1.23.2) (2026-09-18)
 
 
