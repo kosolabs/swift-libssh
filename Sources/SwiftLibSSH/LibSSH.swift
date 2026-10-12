@@ -200,6 +200,7 @@ final actor SSHSession {
   }
   private var files: [SFTPFileID: TrackedFile] = [:]
   private var directories: [SFTPDirectoryID: sftp_dir] = [:]
+  private var connectTimeout: Duration = .seconds(10)
 
   init() throws(SSHError) {
     guard let session: ssh_session = ssh_new() else {
@@ -315,6 +316,13 @@ final actor SSHSession {
 
   // MARK: - Session Operations
 
+  func getOption(_ option: ssh_options_e) -> String? {
+    var value: UnsafeMutablePointer<CChar>?
+    guard ssh_options_get(session, option, &value) == SSH_OK, let value else { return nil }
+    defer { ssh_string_free_char(value) }
+    return String(cString: value)
+  }
+
   func setOption(_ option: ssh_options_e, to value: UnsafeRawPointer) throws(SSHError) {
     try validate(ssh_options_set(session, option, value))
   }
@@ -331,10 +339,32 @@ final actor SSHSession {
   func setTimeout(_ timeout: UInt) throws(SSHError) {
     var timeout = timeout
     try setOption(SSH_OPTIONS_TIMEOUT, to: &timeout)
+    connectTimeout = .seconds(timeout == 0 ? 10 : timeout)
   }
 
   func connect() throws(SSHError) {
+    if var fd = try connectSocket() {
+      try validate(ssh_options_set(session, SSH_OPTIONS_FD, &fd), onFailure: { Darwin.close(fd) })
+    }
     try validate(ssh_connect(session))
+  }
+
+  private func connectSocket() throws(SSHError) -> Int32? {
+    // ssh_config may rewrite the host and port or set a proxy, so apply it
+    // first. libssh won't process it again during ssh_connect.
+    try validate(ssh_options_parse_config(session, nil))
+    // ProxyCommand is configured: leave the connection to libssh.
+    if getOption(SSH_OPTIONS_PROXYCOMMAND) != nil {
+      return nil
+    }
+    guard let host = getOption(SSH_OPTIONS_HOST) else {
+      return nil
+    }
+    var port: UInt32 = 0
+    try validate(ssh_options_get_port(session, &port))
+    let addresses = try SocketConnector.resolve(
+      host: host, port: UInt16(truncatingIfNeeded: port))
+    return try SocketConnector.connect(to: addresses, host: host, timeout: connectTimeout)
   }
 
   func authenticate(user: String) throws(SSHError) {
