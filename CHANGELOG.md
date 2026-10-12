@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.24.1](https://github.com/kosolabs/swift-libssh/compare/v1.24.0...v1.24.1) (2026-10-12)
+
+
+### Bug Fixes
+
+* try all resolved addresses before failing to connect ([#196](https://github.com/kosolabs/swift-libssh/issues/196)) ([ef9ec29](https://github.com/kosolabs/swift-libssh/commit/ef9ec2976f312ff1858767db99349b085f918823))
+
 ## [1.24.0](https://github.com/kosolabs/swift-libssh/compare/v1.23.2...v1.24.0) (2026-09-21)
 
 
