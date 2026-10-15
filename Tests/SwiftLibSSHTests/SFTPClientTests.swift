@@ -1020,6 +1020,59 @@ struct SFTPClientTests {
     }
   }
 
+  @Test func testRenameOverExistingFileReplacesIt() async throws {
+    try await withAuthenticatedClient { ssh in
+      let oldPath = "/tmp/test-rename-over-old.txt"
+      let newPath = "/tmp/test-rename-over-new.txt"
+
+      try await ssh.execute("printf new > \(oldPath) && printf old > \(newPath)")
+
+      try await ssh.withSftp { sftp in
+        try await sftp.move(from: oldPath, to: newPath)
+      }
+
+      let oldAttrs = try await ssh.withSftp { sftp in
+        try? await sftp.attributes(at: oldPath)
+      }
+      #expect(oldAttrs == nil)
+      #expect(try await ssh.execute("cat \(newPath)").stdout.decoded(as: .utf8) == "new")
+    }
+  }
+
+  @Test func testRenameDirectoryOverEmptyDirectoryReplacesIt() async throws {
+    try await withAuthenticatedClient { ssh in
+      let oldPath = "/tmp/test-rename-dir-old"
+      let newPath = "/tmp/test-rename-dir-new"
+
+      try await ssh.execute(
+        "rm -rf \(oldPath) \(newPath) && mkdir \(oldPath) \(newPath) && touch \(oldPath)/file"
+      )
+
+      try await ssh.withSftp { sftp in
+        try await sftp.move(from: oldPath, to: newPath)
+      }
+
+      #expect(try await ssh.execute("ls \(newPath)").stdout.decoded(as: .utf8) == "file\n")
+    }
+  }
+
+  @Test func testRenameDirectoryOverNonEmptyDirectoryThrows() async throws {
+    try await withAuthenticatedClient { ssh in
+      let oldPath = "/tmp/test-rename-full-old"
+      let newPath = "/tmp/test-rename-full-new"
+
+      try await ssh.execute(
+        "rm -rf \(oldPath) \(newPath) && mkdir \(oldPath) \(newPath) && touch \(newPath)/file"
+      )
+
+      await #expect(throws: SSHError.self) {
+        try await ssh.withSftp { sftp in
+          try await sftp.move(from: oldPath, to: newPath)
+        }
+      }
+    }
+  }
+
   @Test func testRenameMissingFileThrowsNoSuchFile() async throws {
     await #expect {
       try await withAuthenticatedClient { ssh in
