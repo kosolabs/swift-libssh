@@ -111,6 +111,7 @@ public enum SSHError: Codable, Error, Sendable, Equatable {
   case connectionFailed(message: String)
   case closed(message: String)
   case authenticationFailed(message: String)
+  case hostKeyMismatch(expected: SSHHostKey, actual: SSHHostKey, message: String)
   case keyError(SSHKeyError, message: String)
   case sftpError(SFTPError, message: String)
   case channelOpenFailed(message: String)
@@ -141,6 +142,11 @@ public enum SSHError: Codable, Error, Sendable, Equatable {
 
   public var isAuthenticationFailed: Bool {
     if case .authenticationFailed = self { return true }
+    return false
+  }
+
+  public var isHostKeyMismatch: Bool {
+    if case .hostKeyMismatch = self { return true }
     return false
   }
 
@@ -347,6 +353,17 @@ final actor SSHSession {
       try validate(ssh_options_set(session, SSH_OPTIONS_FD, &fd), onFailure: { Darwin.close(fd) })
     }
     try validate(ssh_connect(session))
+  }
+
+  func serverHostKey() throws(SSHError) -> SSHHostKey {
+    try requireConnected()
+    var key: ssh_key?
+    try validate(ssh_get_server_publickey(session, &key))
+    guard let key else {
+      throw .invalidState(message: "Server did not provide a host key")
+    }
+    defer { ssh_key_free(key) }
+    return try SSHHostKey.from(raw: key)
   }
 
   private func connectSocket() throws(SSHError) -> Int32? {

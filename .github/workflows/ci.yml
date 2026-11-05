@@ -27,10 +27,14 @@ jobs:
     - name: Start SSH test server
       run: sudo -u myuser ./scripts/start_test_server.sh
 
+    - name: Export the test server host key
+      run: sudo cat /tmp/ssh-test-server-myuser/host_key_ed25519.pub > "$RUNNER_TEMP/host_key_ed25519.pub"
+
     - name: Run tests
       env:
         SWIFT_LIBSSH_TEST_USER: myuser
         SWIFT_LIBSSH_TEST_PASSWORD: mypass
+        SWIFT_LIBSSH_TEST_HOST_KEY_PATH: ${{ runner.temp }}/host_key_ed25519.pub
       run: swift test
 
     - name: Dump sshd log
