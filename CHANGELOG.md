@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.25.0](https://github.com/kosolabs/swift-libssh/compare/v1.24.1...v1.25.0) (2026-11-05)
+
+
+### Features
+
+* verify the server's host key before authenticating ([#200](https://github.com/kosolabs/swift-libssh/issues/200)) ([f85be42](https://github.com/kosolabs/swift-libssh/commit/f85be421a007a2cab16fcd47a879491878f869e0))
+
 ## [1.24.1](https://github.com/kosolabs/swift-libssh/compare/v1.24.0...v1.24.1) (2026-10-12)
 
 
