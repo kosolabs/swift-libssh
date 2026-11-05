@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.26.0](https://github.com/kosolabs/swift-libssh/compare/v1.25.0...v1.26.0) (2026-11-05)
+
+
+### Features
+
+* fetch a server's host key without authenticating ([#202](https://github.com/kosolabs/swift-libssh/issues/202)) ([bc181ad](https://github.com/kosolabs/swift-libssh/commit/bc181ad40870bebcf9a09f3ba25fdbb59de5481b))
+
 ## [1.25.0](https://github.com/kosolabs/swift-libssh/compare/v1.24.1...v1.25.0) (2026-11-05)
 
 
