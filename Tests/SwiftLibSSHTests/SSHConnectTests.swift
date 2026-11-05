@@ -239,6 +239,19 @@ struct SSHConnectTests {
     }
   }
 
+  @Test func hostKeyFetchesServerHostKeyWithoutAuthenticating() async throws {
+    let hostKey = try await SSHClient.hostKey(host: host, port: port)
+    #expect(hostKey == (try serverHostKey))
+  }
+
+  @Test func hostKeyForInvalidHostThrowsConnectionFailed() async throws {
+    await #expect {
+      try await SSHClient.hostKey(host: "invalid")
+    } throws: { error in
+      (error as? SSHError)?.isConnectionFailed == true
+    }
+  }
+
   @Test func matchingExpectedHostKeySucceeds() async throws {
     try await SSHClient.withAuthenticatedClient(
       host: host, port: port, user: user, auth: .privateKey(contentsOf: privateKey),
