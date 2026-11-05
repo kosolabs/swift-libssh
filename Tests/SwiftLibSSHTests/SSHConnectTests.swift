@@ -52,6 +52,17 @@ private var encryptedPrivateKey: URL {
 
 private let encryptedPassphrase = "hunter2"
 
+private var serverHostKey: SSHHostKey {
+  get throws {
+    let env = ProcessInfo.processInfo.environment
+    let path =
+      env["SWIFT_LIBSSH_TEST_HOST_KEY_PATH"]
+      ?? "/tmp/ssh-test-server-\(user)/host_key_ed25519.pub"
+    let contents = try String(contentsOfFile: path, encoding: .utf8)
+    return try #require(SSHHostKey(contents.trimmingCharacters(in: .whitespacesAndNewlines)))
+  }
+}
+
 func client() async throws -> SSHClient {
   return try await SSHClient.connect(
     host: host, port: port, user: user, auth: .privateKey(contentsOf: privateKey))
@@ -217,6 +228,43 @@ struct SSHConnectTests {
         auth: .privateKey(contentsOf: encryptedPrivateKey))
     } throws: { error in
       (error as? SSHError)?.keyError == .passphraseRequired
+    }
+  }
+
+  @Test func hostKeyIsServerHostKey() async throws {
+    let expected = try serverHostKey
+    try await withAuthenticatedClient { ssh in
+      let actual = try await ssh.hostKey
+      #expect(actual == expected)
+    }
+  }
+
+  @Test func matchingExpectedHostKeySucceeds() async throws {
+    try await SSHClient.withAuthenticatedClient(
+      host: host, port: port, user: user, auth: .privateKey(contentsOf: privateKey),
+      expectedHostKey: serverHostKey
+    ) { ssh in
+      let proc = try await ssh.execute("true")
+      #expect(proc.status.code == 0)
+    }
+  }
+
+  @Test func mismatchedExpectedHostKeyThrowsBeforeAuthenticating() async throws {
+    let actual = try serverHostKey
+    let expected = try #require(
+      SSHHostKey(String(contentsOf: publicKey, encoding: .utf8))
+    )
+    await #expect {
+      try await SSHClient.connect(
+        host: host, port: port, user: user, auth: .password("wrong"),
+        expectedHostKey: expected
+      )
+    } throws: { error in
+      (error as? SSHError)
+        == .hostKeyMismatch(
+          expected: expected, actual: actual,
+          message: "Server host key \(actual.fingerprint) does not match \(expected.fingerprint)"
+        )
     }
   }
 

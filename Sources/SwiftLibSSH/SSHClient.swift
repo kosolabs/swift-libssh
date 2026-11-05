@@ -46,6 +46,16 @@ public struct SSHClient: Sendable {
     try await session.connect()
   }
 
+  private func verifyHostKey(_ expected: SSHHostKey) async throws(SSHError) {
+    let actual = try await hostKey
+    guard actual == expected else {
+      throw .hostKeyMismatch(
+        expected: expected, actual: actual,
+        message: "Server host key \(actual.fingerprint) does not match \(expected.fingerprint)"
+      )
+    }
+  }
+
   private func authenticate(user: String, auth: SSHAuthMethod) async throws(SSHError) {
     switch auth {
     case .none:
@@ -61,11 +71,14 @@ public struct SSHClient: Sendable {
 
   public static func connect(
     host: String, port: UInt16 = 22, timeout: UInt = 60,
-    user: String, auth: SSHAuthMethod = .none
+    user: String, auth: SSHAuthMethod = .none, expectedHostKey: SSHHostKey? = nil
   ) async throws(SSHError) -> SSHClient {
     let client = try await SSHClient(host: host, port: port, timeout: timeout)
     do {
       try await client.connect()
+      if let expectedHostKey {
+        try await client.verifyHostKey(expectedHostKey)
+      }
       try await client.authenticate(user: user, auth: auth)
       return client
     } catch {
@@ -77,11 +90,12 @@ public struct SSHClient: Sendable {
   @discardableResult
   public static func withAuthenticatedClient<T: Sendable>(
     host: String, port: UInt16 = 22, timeout: UInt = 60,
-    user: String, auth: SSHAuthMethod = .none,
+    user: String, auth: SSHAuthMethod = .none, expectedHostKey: SSHHostKey? = nil,
     perform body: @Sendable (SSHClient) async throws -> T
   ) async throws -> T {
     let client = try await connect(
-      host: host, port: port, timeout: timeout, user: user, auth: auth
+      host: host, port: port, timeout: timeout, user: user, auth: auth,
+      expectedHostKey: expectedHostKey
     )
     do {
       let result = try await body(client)
@@ -90,6 +104,12 @@ public struct SSHClient: Sendable {
     } catch {
       await client.close()
       throw error
+    }
+  }
+
+  public var hostKey: SSHHostKey {
+    get async throws(SSHError) {
+      try await session.serverHostKey()
     }
   }
 
