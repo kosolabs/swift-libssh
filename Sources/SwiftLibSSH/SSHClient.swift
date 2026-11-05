@@ -87,6 +87,21 @@ public struct SSHClient: Sendable {
     }
   }
 
+  public static func hostKey(
+    host: String, port: UInt16 = 22, timeout: UInt = 60
+  ) async throws(SSHError) -> SSHHostKey {
+    let client = try await SSHClient(host: host, port: port, timeout: timeout)
+    do {
+      try await client.connect()
+      let hostKey = try await client.hostKey
+      await client.close()
+      return hostKey
+    } catch {
+      await client.close()
+      throw error
+    }
+  }
+
   @discardableResult
   public static func withAuthenticatedClient<T: Sendable>(
     host: String, port: UInt16 = 22, timeout: UInt = 60,
