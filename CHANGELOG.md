@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.26.1](https://github.com/kosolabs/swift-libssh/compare/v1.26.0...v1.26.1) (2026-11-06)
+
+
+### Bug Fixes
+
+* close the socket when a session is freed ([#204](https://github.com/kosolabs/swift-libssh/issues/204)) ([45d3ed4](https://github.com/kosolabs/swift-libssh/commit/45d3ed471a25ea695284b5b3a704d0d0e9670878))
+
 ## [1.26.0](https://github.com/kosolabs/swift-libssh/compare/v1.25.0...v1.26.0) (2026-11-05)
 
 
