@@ -1,0 +1,411 @@
+From 3a203e234a0d29aae919f3e611ad5d7f8c711235 Mon Sep 17 00:00:00 2001
+From: Shad Sharma <shadanan@gmail.com>
+Date: Fri, 6 Nov 2026 13:57:42 -0800
+Subject: [PATCH] connect: Try the next address when a connection attempt fails
+
+Since 1c0b8f62, ssh_connect_host_nonblocking() moves on to the next
+address of a host when connect() fails right away. A nonblocking
+connect() usually reports its error later though, in the poll callback,
+and by then the remaining addresses are gone. For example, when a host
+resolves to an IPv6 and an IPv4 address and the server only listens on
+IPv4, the connection fails with "Connection refused" instead of using
+the IPv4 address.
+
+Keep the addresses on the socket while it connects, and when the poll
+callback reports an error, connect to the next address.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ include/libssh/priv.h            |   4 +-
+ src/connect.c                    |  53 +++++++++------
+ src/socket.c                     |  75 ++++++++++++++++++++-
+ tests/unittests/CMakeLists.txt   |   2 +
+ tests/unittests/torture_socket.c | 112 +++++++++++++++++++++++++++++++
+ 5 files changed, 223 insertions(+), 23 deletions(-)
+ create mode 100644 tests/unittests/torture_socket.c
+
+diff --git a/include/libssh/priv.h b/include/libssh/priv.h
+index cab04452..f7301854 100644
+--- a/include/libssh/priv.h
++++ b/include/libssh/priv.h
+@@ -337,8 +337,10 @@ int ssh_send_banner(ssh_session session, int is_server);
+ void ssh_session_socket_close(ssh_session session);
+ 
+ /* connect.c */
++struct addrinfo;
+ socket_t ssh_connect_host_nonblocking(ssh_session session, const char *host,
+-		const char *bind_addr, int port);
++		const char *bind_addr, int port, struct addrinfo **ai,
++		struct addrinfo **next);
+ 
+ /* in base64.c */
+ ssh_buffer base64_to_bin(const char *source);
+diff --git a/src/connect.c b/src/connect.c
+index 0758e468..fd0cad5f 100644
+--- a/src/connect.c
++++ b/src/connect.c
+@@ -158,18 +158,27 @@ static int set_tcp_nodelay(socket_t socket)
+  * @brief Launches a nonblocking connect to an IPv4 or IPv6 host
+  * specified by its IP address or hostname.
+  *
++ * @param[in,out] ai    The addresses to connect to. If it points to NULL,
++ *                      the host is resolved and its addresses are stored here;
++ *                      the caller frees them with freeaddrinfo().
++ * @param[in,out] next  The address of @p ai to start with, if @p ai was given.
++ *                      On return, the address to try next if the returned
++ *                      socket fails to connect, or NULL.
++ *
+  * @returns A file descriptor, < 0 on error.
+  * @warning very ugly !!!
+  */
+ socket_t ssh_connect_host_nonblocking(ssh_session session, const char *host,
+-                                      const char *bind_addr, int port)
++                                      const char *bind_addr, int port,
++                                      struct addrinfo **ai,
++                                      struct addrinfo **next)
+ {
+     socket_t s = -1, first = -1;
+     int rc;
+     int ai_family;
+     static const char *ai_family_str = NULL;
+-    struct addrinfo *ai = NULL;
+     struct addrinfo *itr = NULL;
++    struct addrinfo *first_next = NULL;
+     char addrname[NI_MAXHOST], portname[NI_MAXSERV];
+ 
+     switch (session->opts.address_family) {
+@@ -186,24 +195,27 @@ socket_t ssh_connect_host_nonblocking(ssh_session session, const char *host,
+         ai_family = PF_UNSPEC;
+         ai_family_str = "any";
+     }
+-    SSH_LOG(SSH_LOG_PACKET,
+-            "Resolve target hostname %s port %d (%s)",
+-            host,
+-            port,
+-            ai_family_str);
+-    rc = getai(host, port, ai_family, &ai);
+-    if (rc != 0) {
+-        ssh_set_error(session,
+-                      SSH_FATAL,
+-                      "Failed to resolve hostname %s (%s): %s",
+-                      host,
+-                      ai_family_str,
+-                      gai_strerror(rc));
+-
+-        return -1;
++    if (*ai == NULL) {
++        SSH_LOG(SSH_LOG_PACKET,
++                "Resolve target hostname %s port %d (%s)",
++                host,
++                port,
++                ai_family_str);
++        rc = getai(host, port, ai_family, ai);
++        if (rc != 0) {
++            ssh_set_error(session,
++                          SSH_FATAL,
++                          "Failed to resolve hostname %s (%s): %s",
++                          host,
++                          ai_family_str,
++                          gai_strerror(rc));
++
++            return -1;
++        }
++        *next = *ai;
+     }
+ 
+-    for (itr = ai; itr != NULL; itr = itr->ai_next) {
++    for (itr = *next; itr != NULL; itr = itr->ai_next) {
+         char err_msg[SSH_ERRNO_MSG_MAX] = {0};
+         /* create socket */
+         s = socket(itr->ai_family, itr->ai_socktype, itr->ai_protocol);
+@@ -317,6 +329,7 @@ socket_t ssh_connect_host_nonblocking(ssh_session session, const char *host,
+                 if (first == -1) {
+                     SSH_LOG(SSH_LOG_PACKET, "EINPROGRESS => Store for later.");
+                     first = s;
++                    first_next = itr->ai_next;
+                 } else { /* errno == EINPROGRESS */
+                     /* save only the first "working" socket */
+                     ssh_connect_socket_close(s);
+@@ -329,12 +342,12 @@ socket_t ssh_connect_host_nonblocking(ssh_session session, const char *host,
+         break;
+     }
+ 
+-    freeaddrinfo(ai);
+-
+     /* first let's go through all the addresses looking for immediate
+      * connection, otherwise return the first address without error or error */
++    *next = NULL;
+     if (s == -1) {
+         s = first;
++        *next = first_next;
+     } else if (s != first && first != -1) {
+         /* Clean up the saved socket if any */
+         ssh_connect_socket_close(first);
+diff --git a/src/socket.c b/src/socket.c
+index 21488353..002d3680 100644
+--- a/src/socket.c
++++ b/src/socket.c
+@@ -39,6 +39,7 @@ struct sockaddr_un {
+ #endif
+ #else /* _WIN32 */
+ #include <fcntl.h>
++#include <netdb.h>
+ #include <sys/types.h>
+ #include <sys/wait.h>
+ #include <sys/socket.h>
+@@ -94,6 +95,12 @@ struct ssh_socket_struct {
+ #ifndef _WIN32
+   pid_t proxy_pid;
+ #endif
++  /* The host ssh_socket_connect() connects to and its addresses */
++  char *host;
++  char *bind_addr;
++  uint16_t port;
++  struct addrinfo *ai;
++  struct addrinfo *ai_next;
+ };
+ 
+ #ifdef HAVE_PTHREAD
+@@ -212,6 +219,24 @@ ssh_socket ssh_socket_new(ssh_session session)
+     return s;
+ }
+ 
++/**
++ * @internal
++ *
++ * @brief Free the host ssh_socket_connect() connects to and its addresses.
++ *
++ * @param[in] s The SSH socket.
++ */
++static void ssh_socket_free_host(ssh_socket s)
++{
++    SAFE_FREE(s->host);
++    SAFE_FREE(s->bind_addr);
++    if (s->ai != NULL) {
++        freeaddrinfo(s->ai);
++        s->ai = NULL;
++    }
++    s->ai_next = NULL;
++}
++
+ /**
+  * @internal
+  *
+@@ -240,6 +265,7 @@ void ssh_socket_reset(ssh_socket s)
+ #ifndef _WIN32
+     s->proxy_pid = 0;
+ #endif
++    ssh_socket_free_host(s);
+ }
+ 
+ /**
+@@ -314,11 +340,31 @@ int ssh_socket_pollcallback(struct ssh_poll_handle_struct *p,
+     if ((revents & POLLERR) || (revents & POLLHUP)) {
+         /* Check if we are in a connecting state */
+         if (s->state == SSH_SOCKET_CONNECTING) {
+-            s->state = SSH_SOCKET_ERROR;
+             rc = getsockopt(fd, SOL_SOCKET, SO_ERROR, (char *)&err, &errlen);
+             if (rc < 0) {
+                 err = errno;
+             }
++            /* Try the next address of the host, if any */
++            if (s->ai_next != NULL) {
++                char err_msg[SSH_ERRNO_MSG_MAX] = {0};
++                socket_t next_fd;
++
++                SSH_LOG(SSH_LOG_PACKET,
++                        "Failed to connect: %s, trying the next address",
++                        ssh_strerror(err, err_msg, SSH_ERRNO_MSG_MAX));
++                next_fd = ssh_connect_host_nonblocking(s->session,
++                                                       s->host,
++                                                       s->bind_addr,
++                                                       s->port,
++                                                       &s->ai,
++                                                       &s->ai_next);
++                if (next_fd != SSH_INVALID_SOCKET) {
++                    CLOSE_SOCKET(s->fd);
++                    ssh_socket_set_fd(s, next_fd);
++                    return 0;
++                }
++            }
++            s->state = SSH_SOCKET_ERROR;
+             ssh_socket_close(s);
+             /* Overwrite ssh_socket_close() error with the real socket error */
+             s->last_errno = err;
+@@ -475,6 +521,7 @@ void ssh_socket_free(ssh_socket s)
+         return;
+     }
+     ssh_socket_close(s);
++    ssh_socket_free_host(s);
+     SSH_BUFFER_FREE(s->in_buffer);
+     SSH_BUFFER_FREE(s->out_buffer);
+     SAFE_FREE(s);
+@@ -1140,9 +1187,33 @@ int ssh_socket_connect(ssh_socket s,
+                       "ssh_socket_connect called on socket not unconnected");
+         return SSH_ERROR;
+     }
+-    fd = ssh_connect_host_nonblocking(s->session, host, bind_addr, port);
++
++    /* Keep the host to try its next address if this connection fails */
++    s->host = strdup(host);
++    if (s->host == NULL) {
++        ssh_set_error_oom(s->session);
++        ssh_socket_free_host(s);
++        return SSH_ERROR;
++    }
++    if (bind_addr != NULL) {
++        s->bind_addr = strdup(bind_addr);
++        if (s->bind_addr == NULL) {
++            ssh_set_error_oom(s->session);
++            ssh_socket_free_host(s);
++            return SSH_ERROR;
++        }
++    }
++    s->port = port;
++
++    fd = ssh_connect_host_nonblocking(s->session,
++                                      host,
++                                      bind_addr,
++                                      port,
++                                      &s->ai,
++                                      &s->ai_next);
+     SSH_LOG(SSH_LOG_DEBUG, "Nonblocking connection socket: %d", fd);
+     if (fd == SSH_INVALID_SOCKET) {
++        ssh_socket_free_host(s);
+         return SSH_ERROR;
+     }
+     return ssh_socket_set_fd(s, fd);
+diff --git a/tests/unittests/CMakeLists.txt b/tests/unittests/CMakeLists.txt
+index d76924bb..072ae0cf 100644
+--- a/tests/unittests/CMakeLists.txt
++++ b/tests/unittests/CMakeLists.txt
+@@ -53,6 +53,8 @@ if (UNIX AND NOT WIN32)
+         torture_pki_sshsig
+         # requires /dev/null
+         torture_channel
++        # this uses loopback TCP sockets
++        torture_socket
+     )
+     if (HAVE_IFADDRS_H)
+         set(LIBSSH_UNIT_TESTS
+diff --git a/tests/unittests/torture_socket.c b/tests/unittests/torture_socket.c
+new file mode 100644
+index 00000000..9afb5253
+--- /dev/null
++++ b/tests/unittests/torture_socket.c
+@@ -0,0 +1,112 @@
++#include "config.h"
++
++#define LIBSSH_STATIC
++
++#include "libssh/poll.h"
++#include "libssh/session.h"
++#include "libssh/socket.h"
++#include "torture.h"
++
++#include <arpa/inet.h>
++#include <errno.h>
++#include <netdb.h>
++#include <netinet/in.h>
++#include <sys/socket.h>
++#include <unistd.h>
++
++#include "socket.c"
++
++static socket_t bind_loopback(struct addrinfo **ai)
++{
++    struct addrinfo hints = {
++        .ai_family = AF_INET,
++        .ai_socktype = SOCK_STREAM,
++        .ai_flags = AI_NUMERICHOST | AI_NUMERICSERV,
++    };
++    struct sockaddr_in addr = {
++        .sin_family = AF_INET,
++        .sin_addr.s_addr = htonl(INADDR_LOOPBACK),
++    };
++    socklen_t len = sizeof(addr);
++    char port[NI_MAXSERV];
++    socket_t fd;
++    int rc;
++
++    fd = socket(AF_INET, SOCK_STREAM, 0);
++    assert_return_code(fd, errno);
++    rc = bind(fd, (struct sockaddr *)&addr, sizeof(addr));
++    assert_return_code(rc, errno);
++    rc = getsockname(fd, (struct sockaddr *)&addr, &len);
++    assert_return_code(rc, errno);
++
++    snprintf(port, sizeof(port), "%hu", ntohs(addr.sin_port));
++    rc = getaddrinfo("127.0.0.1", port, &hints, ai);
++    assert_int_equal(rc, 0);
++
++    return fd;
++}
++
++static void torture_socket_connect_next_address(void **state)
++{
++    struct addrinfo *refusing = NULL, *accepting = NULL;
++    socket_t refusing_fd, accepting_fd, fd;
++    ssh_session session = NULL;
++    ssh_poll_ctx ctx = NULL;
++    ssh_socket s = NULL;
++    int rc, i;
++
++    (void)state;
++
++    /* Connecting to a socket that is bound but not listening is refused */
++    refusing_fd = bind_loopback(&refusing);
++    accepting_fd = bind_loopback(&accepting);
++    rc = listen(accepting_fd, 1);
++    assert_return_code(rc, errno);
++
++    session = ssh_new();
++    assert_non_null(session);
++    s = session->socket;
++
++    /* As if the host resolved to the refusing address first */
++    refusing->ai_next = accepting;
++    s->ai = refusing;
++    s->ai_next = refusing;
++
++    rc = ssh_socket_connect(s, "127.0.0.1", 0, NULL);
++    assert_int_equal(rc, SSH_OK);
++
++    ctx = ssh_poll_get_default_ctx(session);
++    assert_non_null(ctx);
++    rc = ssh_poll_ctx_add_socket(ctx, s);
++    assert_int_equal(rc, SSH_OK);
++    for (i = 0; i < 10 && s->state == SSH_SOCKET_CONNECTING; i++) {
++        ssh_poll_ctx_dopoll(ctx, 1000);
++    }
++    assert_int_equal(s->state, SSH_SOCKET_CONNECTED);
++
++    fd = accept(accepting_fd, NULL, NULL);
++    assert_return_code(fd, errno);
++
++    /* Each list from getaddrinfo() has to be freed on its own */
++    refusing->ai_next = NULL;
++    freeaddrinfo(accepting);
++
++    close(fd);
++    ssh_free(session);
++    close(accepting_fd);
++    close(refusing_fd);
++}
++
++int torture_run_tests(void)
++{
++    int rc;
++    struct CMUnitTest tests[] = {
++        cmocka_unit_test(torture_socket_connect_next_address),
++    };
++
++    ssh_init();
++    torture_filter_tests(tests);
++    rc = cmocka_run_group_tests(tests, NULL, NULL);
++    ssh_finalize();
++    return rc;
++}
+-- 
+2.54.0 (Apple Git-157)
+

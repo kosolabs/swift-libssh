@@ -7,6 +7,7 @@ export MACOSX_DEPLOYMENT_TARGET=15.0
 set -euo pipefail
 
 export KEYROOT=$(realpath keys)
+export PATCHROOT=$(realpath patches)
 export SDKROOT=$(xcrun --sdk macosx --show-sdk-path)
 
 rm -rf .build/clibssh
@@ -72,6 +73,13 @@ curl -LO https://www.libssh.org/files/$LIBSSH_SERIES/$LIBSSH.tar.xz
 curl -LO https://www.libssh.org/files/$LIBSSH_SERIES/$LIBSSH.tar.xz.asc
 gpgv --keyring $KEYROOT/libssh.gpg $LIBSSH.tar.xz.asc $LIBSSH.tar.xz
 tar xzf $LIBSSH.tar.xz
+
+# Patch libssh
+
+cd $BUILD/src/$LIBSSH
+for PATCH in $PATCHROOT/libssh/*.patch; do
+  patch -p1 --forward --fuzz=0 --input $PATCH
+done
 
 # Build libssh for arm64
 
