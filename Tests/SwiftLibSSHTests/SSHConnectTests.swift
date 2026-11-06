@@ -244,6 +244,17 @@ struct SSHConnectTests {
     #expect(hostKey == (try serverHostKey))
   }
 
+  @Test func closingReleasesTheSocket() async throws {
+    let before = try openDescriptorCount()
+    for _ in 0..<25 {
+      _ = try await SSHClient.hostKey(host: host, port: port)
+      let ssh = try await client()
+      await ssh.close()
+    }
+
+    #expect(try openDescriptorCount() - before < 25)
+  }
+
   @Test func hostKeyForInvalidHostThrowsConnectionFailed() async throws {
     await #expect {
       try await SSHClient.hostKey(host: "invalid")
@@ -304,4 +315,8 @@ struct SSHConnectTests {
       (error as? SSHError)?.isConnectionFailed == true
     }
   }
+}
+
+private func openDescriptorCount() throws -> Int {
+  try FileManager.default.contentsOfDirectory(atPath: "/dev/fd").count
 }

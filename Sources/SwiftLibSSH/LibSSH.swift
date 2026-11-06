@@ -207,6 +207,7 @@ final actor SSHSession {
   private var files: [SFTPFileID: TrackedFile] = [:]
   private var directories: [SFTPDirectoryID: sftp_dir] = [:]
   private var connectTimeout: Duration = .seconds(10)
+  private var socket: Int32?
 
   init() throws(SSHError) {
     guard let session: ssh_session = ssh_new() else {
@@ -226,6 +227,10 @@ final actor SSHSession {
     releaseResources()
     ssh_free(session)
     session = nil
+    if let socket {
+      Darwin.close(socket)
+      self.socket = nil
+    }
   }
 
   func close() {
@@ -351,6 +356,7 @@ final actor SSHSession {
   func connect() throws(SSHError) {
     if var fd = try connectSocket() {
       try validate(ssh_options_set(session, SSH_OPTIONS_FD, &fd), onFailure: { Darwin.close(fd) })
+      socket = fd
     }
     try validate(ssh_connect(session))
   }
