@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.26.2](https://github.com/kosolabs/swift-libssh/compare/v1.26.1...v1.26.2) (2026-11-07)
+
+
+### Bug Fixes
+
+* let libssh try each resolved address when connecting ([#206](https://github.com/kosolabs/swift-libssh/issues/206)) ([685be7b](https://github.com/kosolabs/swift-libssh/commit/685be7b1369e3151e2aa89a25d70fd1ff9f16cb9))
+
 ## [1.26.1](https://github.com/kosolabs/swift-libssh/compare/v1.26.0...v1.26.1) (2026-11-06)
 
 
