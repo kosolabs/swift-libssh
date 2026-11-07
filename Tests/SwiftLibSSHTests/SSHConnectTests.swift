@@ -263,6 +263,20 @@ struct SSHConnectTests {
     }
   }
 
+  @Test func connectTriesTheNextAddressWhenOneRefuses() async throws {
+    // localhost resolves to ::1 before 127.0.0.1, and only 127.0.0.1 listens.
+    let listener = try IPv4LoopbackListener()
+    let port = listener.port
+    let connecting = Task {
+      try await SSHClient.hostKey(host: "localhost", port: port, timeout: 5)
+    }
+    let connection = listener.accept(timeout: .seconds(5))
+    if let connection { Darwin.close(connection) }
+    _ = await connecting.result
+
+    #expect(connection != nil)
+  }
+
   @Test func matchingExpectedHostKeySucceeds() async throws {
     try await SSHClient.withAuthenticatedClient(
       host: host, port: port, user: user, auth: .privateKey(contentsOf: privateKey),
@@ -319,4 +333,40 @@ struct SSHConnectTests {
 
 private func openDescriptorCount() throws -> Int {
   try FileManager.default.contentsOfDirectory(atPath: "/dev/fd").count
+}
+
+private final class IPv4LoopbackListener {
+  let fd: Int32
+  let port: UInt16
+
+  init() throws {
+    let fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)
+    var addr = sockaddr_in()
+    addr.sin_family = sa_family_t(AF_INET)
+    addr.sin_addr.s_addr = inet_addr("127.0.0.1")
+    var length = socklen_t(MemoryLayout<sockaddr_in>.size)
+    let rc = withUnsafeMutablePointer(to: &addr) {
+      $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+        bind(fd, $0, length) == 0 && listen(fd, 8) == 0 && getsockname(fd, $0, &length) == 0
+      }
+    }
+    guard rc else {
+      Darwin.close(fd)
+      throw POSIXError(.init(rawValue: errno)!)
+    }
+    self.fd = fd
+    port = UInt16(bigEndian: addr.sin_port)
+  }
+
+  deinit {
+    Darwin.close(fd)
+  }
+
+  func accept(timeout: Duration) -> Int32? {
+    var pfd = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
+    let milliseconds = Int32(timeout.components.seconds * 1000)
+    guard poll(&pfd, 1, milliseconds) == 1 else { return nil }
+    let connection = Darwin.accept(fd, nil, nil)
+    return connection >= 0 ? connection : nil
+  }
 }
