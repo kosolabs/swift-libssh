@@ -268,13 +268,12 @@ struct SSHConnectTests {
     let listener = try IPv4LoopbackListener()
     let port = listener.port
     let connecting = Task {
-      try await SSHClient.hostKey(host: "localhost", port: port, timeout: 5)
+      try await SSHClient.hostKey(host: "localhost", port: port, timeout: 10)
     }
-    let connection = listener.accept(timeout: .seconds(5))
-    if let connection { Darwin.close(connection) }
+    let connected = await listener.receivesConnection(within: .seconds(10))
     _ = await connecting.result
 
-    #expect(connection != nil)
+    #expect(connected)
   }
 
   @Test func matchingExpectedHostKeySucceeds() async throws {
@@ -335,7 +334,7 @@ private func openDescriptorCount() throws -> Int {
   try FileManager.default.contentsOfDirectory(atPath: "/dev/fd").count
 }
 
-private final class IPv4LoopbackListener {
+private final class IPv4LoopbackListener: Sendable {
   let fd: Int32
   let port: UInt16
 
@@ -362,11 +361,24 @@ private final class IPv4LoopbackListener {
     Darwin.close(fd)
   }
 
-  func accept(timeout: Duration) -> Int32? {
+  /// Accepts and closes one connection. Waits on a Dispatch thread, so the
+  /// blocking poll can't starve the cooperative thread pool that the
+  /// connecting client needs.
+  func receivesConnection(within timeout: Duration) async -> Bool {
+    await withCheckedContinuation { continuation in
+      DispatchQueue.global().async {
+        continuation.resume(returning: self.acceptAndClose(timeout: timeout))
+      }
+    }
+  }
+
+  private func acceptAndClose(timeout: Duration) -> Bool {
     var pfd = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
     let milliseconds = Int32(timeout.components.seconds * 1000)
-    guard poll(&pfd, 1, milliseconds) == 1 else { return nil }
+    guard poll(&pfd, 1, milliseconds) == 1 else { return false }
     let connection = Darwin.accept(fd, nil, nil)
-    return connection >= 0 ? connection : nil
+    guard connection >= 0 else { return false }
+    Darwin.close(connection)
+    return true
   }
 }
