@@ -1,4 +1,4 @@
-From 3a203e234a0d29aae919f3e611ad5d7f8c711235 Mon Sep 17 00:00:00 2001
+From b6e129140563ec913349a28c97760b2fd6a28683 Mon Sep 17 00:00:00 2001
 From: Shad Sharma <shadanan@gmail.com>
 Date: Fri, 6 Nov 2026 13:57:42 -0800
 Subject: [PATCH] connect: Try the next address when a connection attempt fails
@@ -15,36 +15,41 @@ Keep the addresses on the socket while it connects, and when the poll
 callback reports an error, connect to the next address.
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Signed-off-by: Shad Sharma <shadanan@gmail.com>
 ---
- include/libssh/priv.h            |   4 +-
- src/connect.c                    |  53 +++++++++------
- src/socket.c                     |  75 ++++++++++++++++++++-
+ include/libssh/priv.h            |   9 +-
+ src/connect.c                    |  57 +++++----
+ src/socket.c                     |  85 +++++++++++++-
  tests/unittests/CMakeLists.txt   |   2 +
- tests/unittests/torture_socket.c | 112 +++++++++++++++++++++++++++++++
- 5 files changed, 223 insertions(+), 23 deletions(-)
+ tests/unittests/torture_socket.c | 191 +++++++++++++++++++++++++++++++
+ 5 files changed, 316 insertions(+), 28 deletions(-)
  create mode 100644 tests/unittests/torture_socket.c
 
 diff --git a/include/libssh/priv.h b/include/libssh/priv.h
-index cab04452..f7301854 100644
+index cab04452..2f2d936a 100644
 --- a/include/libssh/priv.h
 +++ b/include/libssh/priv.h
-@@ -337,8 +337,10 @@ int ssh_send_banner(ssh_session session, int is_server);
+@@ -337,8 +337,13 @@ int ssh_send_banner(ssh_session session, int is_server);
  void ssh_session_socket_close(ssh_session session);
  
  /* connect.c */
-+struct addrinfo;
- socket_t ssh_connect_host_nonblocking(ssh_session session, const char *host,
+-socket_t ssh_connect_host_nonblocking(ssh_session session, const char *host,
 -		const char *bind_addr, int port);
-+		const char *bind_addr, int port, struct addrinfo **ai,
-+		struct addrinfo **next);
++struct addrinfo;
++socket_t ssh_connect_host_nonblocking(ssh_session session,
++                                      const char *host,
++                                      const char *bind_addr,
++                                      int port,
++                                      struct addrinfo **ai,
++                                      struct addrinfo **next);
  
  /* in base64.c */
  ssh_buffer base64_to_bin(const char *source);
 diff --git a/src/connect.c b/src/connect.c
-index 0758e468..fd0cad5f 100644
+index 0758e468..39d30237 100644
 --- a/src/connect.c
 +++ b/src/connect.c
-@@ -158,18 +158,27 @@ static int set_tcp_nodelay(socket_t socket)
+@@ -158,18 +158,29 @@ static int set_tcp_nodelay(socket_t socket)
   * @brief Launches a nonblocking connect to an IPv4 or IPv6 host
   * specified by its IP address or hostname.
   *
@@ -58,9 +63,12 @@ index 0758e468..fd0cad5f 100644
   * @returns A file descriptor, < 0 on error.
   * @warning very ugly !!!
   */
- socket_t ssh_connect_host_nonblocking(ssh_session session, const char *host,
+-socket_t ssh_connect_host_nonblocking(ssh_session session, const char *host,
 -                                      const char *bind_addr, int port)
-+                                      const char *bind_addr, int port,
++socket_t ssh_connect_host_nonblocking(ssh_session session,
++                                      const char *host,
++                                      const char *bind_addr,
++                                      int port,
 +                                      struct addrinfo **ai,
 +                                      struct addrinfo **next)
  {
@@ -74,7 +82,7 @@ index 0758e468..fd0cad5f 100644
      char addrname[NI_MAXHOST], portname[NI_MAXSERV];
  
      switch (session->opts.address_family) {
-@@ -186,24 +195,27 @@ socket_t ssh_connect_host_nonblocking(ssh_session session, const char *host,
+@@ -186,24 +197,27 @@ socket_t ssh_connect_host_nonblocking(ssh_session session, const char *host,
          ai_family = PF_UNSPEC;
          ai_family_str = "any";
      }
@@ -118,7 +126,7 @@ index 0758e468..fd0cad5f 100644
          char err_msg[SSH_ERRNO_MSG_MAX] = {0};
          /* create socket */
          s = socket(itr->ai_family, itr->ai_socktype, itr->ai_protocol);
-@@ -317,6 +329,7 @@ socket_t ssh_connect_host_nonblocking(ssh_session session, const char *host,
+@@ -317,6 +331,7 @@ socket_t ssh_connect_host_nonblocking(ssh_session session, const char *host,
                  if (first == -1) {
                      SSH_LOG(SSH_LOG_PACKET, "EINPROGRESS => Store for later.");
                      first = s;
@@ -126,7 +134,7 @@ index 0758e468..fd0cad5f 100644
                  } else { /* errno == EINPROGRESS */
                      /* save only the first "working" socket */
                      ssh_connect_socket_close(s);
-@@ -329,12 +342,12 @@ socket_t ssh_connect_host_nonblocking(ssh_session session, const char *host,
+@@ -329,12 +344,12 @@ socket_t ssh_connect_host_nonblocking(ssh_session session, const char *host,
          break;
      }
  
@@ -142,17 +150,25 @@ index 0758e468..fd0cad5f 100644
          /* Clean up the saved socket if any */
          ssh_connect_socket_close(first);
 diff --git a/src/socket.c b/src/socket.c
-index 21488353..002d3680 100644
+index 21488353..58cd3430 100644
 --- a/src/socket.c
 +++ b/src/socket.c
-@@ -39,6 +39,7 @@ struct sockaddr_un {
+@@ -39,11 +39,12 @@ struct sockaddr_un {
  #endif
  #else /* _WIN32 */
  #include <fcntl.h>
+-#include <sys/types.h>
+-#include <sys/wait.h>
 +#include <netdb.h>
- #include <sys/types.h>
- #include <sys/wait.h>
++#include <signal.h>
  #include <sys/socket.h>
++#include <sys/types.h>
+ #include <sys/un.h>
+-#include <signal.h>
++#include <sys/wait.h>
+ #ifdef HAVE_PTHREAD
+ #include <pthread.h>
+ #endif
 @@ -94,6 +95,12 @@ struct ssh_socket_struct {
  #ifndef _WIN32
    pid_t proxy_pid;
@@ -199,7 +215,15 @@ index 21488353..002d3680 100644
  }
  
  /**
-@@ -314,11 +340,31 @@ int ssh_socket_pollcallback(struct ssh_poll_handle_struct *p,
+@@ -268,6 +294,7 @@ void ssh_socket_set_callbacks(ssh_socket s, ssh_socket_callbacks callbacks)
+ void ssh_socket_set_connected(ssh_socket s, struct ssh_poll_handle_struct *p)
+ {
+     s->state = SSH_SOCKET_CONNECTED;
++    ssh_socket_free_host(s);
+     /* `POLLOUT` is the event to wait for in a non-blocking connect */
+     if (p != NULL) {
+         ssh_poll_set_events(p, POLLIN | POLLOUT);
+@@ -314,11 +341,34 @@ int ssh_socket_pollcallback(struct ssh_poll_handle_struct *p,
      if ((revents & POLLERR) || (revents & POLLHUP)) {
          /* Check if we are in a connecting state */
          if (s->state == SSH_SOCKET_CONNECTING) {
@@ -211,11 +235,13 @@ index 21488353..002d3680 100644
 +            /* Try the next address of the host, if any */
 +            if (s->ai_next != NULL) {
 +                char err_msg[SSH_ERRNO_MSG_MAX] = {0};
++                const char *err_str = NULL;
 +                socket_t next_fd;
 +
++                err_str = ssh_strerror(err, err_msg, SSH_ERRNO_MSG_MAX);
 +                SSH_LOG(SSH_LOG_PACKET,
 +                        "Failed to connect: %s, trying the next address",
-+                        ssh_strerror(err, err_msg, SSH_ERRNO_MSG_MAX));
++                        err_str);
 +                next_fd = ssh_connect_host_nonblocking(s->session,
 +                                                       s->host,
 +                                                       s->bind_addr,
@@ -229,10 +255,11 @@ index 21488353..002d3680 100644
 +                }
 +            }
 +            s->state = SSH_SOCKET_ERROR;
++            ssh_socket_free_host(s);
              ssh_socket_close(s);
              /* Overwrite ssh_socket_close() error with the real socket error */
              s->last_errno = err;
-@@ -475,6 +521,7 @@ void ssh_socket_free(ssh_socket s)
+@@ -475,6 +525,7 @@ void ssh_socket_free(ssh_socket s)
          return;
      }
      ssh_socket_close(s);
@@ -240,7 +267,7 @@ index 21488353..002d3680 100644
      SSH_BUFFER_FREE(s->in_buffer);
      SSH_BUFFER_FREE(s->out_buffer);
      SAFE_FREE(s);
-@@ -1140,9 +1187,33 @@ int ssh_socket_connect(ssh_socket s,
+@@ -1140,9 +1191,33 @@ int ssh_socket_connect(ssh_socket s,
                        "ssh_socket_connect called on socket not unconnected");
          return SSH_ERROR;
      }
@@ -290,10 +317,10 @@ index d76924bb..072ae0cf 100644
          set(LIBSSH_UNIT_TESTS
 diff --git a/tests/unittests/torture_socket.c b/tests/unittests/torture_socket.c
 new file mode 100644
-index 00000000..9afb5253
+index 00000000..a669c9c0
 --- /dev/null
 +++ b/tests/unittests/torture_socket.c
-@@ -0,0 +1,112 @@
+@@ -0,0 +1,191 @@
 +#include "config.h"
 +
 +#define LIBSSH_STATIC
@@ -307,10 +334,22 @@ index 00000000..9afb5253
 +#include <errno.h>
 +#include <netdb.h>
 +#include <netinet/in.h>
++#include <string.h>
 +#include <sys/socket.h>
 +#include <unistd.h>
 +
++static struct addrinfo *freed_ai = NULL;
++
++static void record_freeaddrinfo(struct addrinfo *ai)
++{
++    freed_ai = ai;
++}
++
++/* The tests join lists from separate getaddrinfo() calls, which
++ * freeaddrinfo() cannot free together, so they free each list themselves */
++#define freeaddrinfo record_freeaddrinfo
 +#include "socket.c"
++#undef freeaddrinfo
 +
 +static socket_t bind_loopback(struct addrinfo **ai)
 +{
@@ -329,7 +368,9 @@ index 00000000..9afb5253
 +    int rc;
 +
 +    fd = socket(AF_INET, SOCK_STREAM, 0);
-+    assert_return_code(fd, errno);
++    if (fd < 0) {
++        fail_msg("socket: %s", strerror(errno));
++    }
 +    rc = bind(fd, (struct sockaddr *)&addr, sizeof(addr));
 +    assert_return_code(rc, errno);
 +    rc = getsockname(fd, (struct sockaddr *)&addr, &len);
@@ -342,20 +383,43 @@ index 00000000..9afb5253
 +    return fd;
 +}
 +
++/* macOS drops a SYN to a socket that is bound but not listening, so the
++ * connection times out instead of being refused. A closed port is refused.
++ * Close it only once every other port of the test is bound, or one of them
++ * may be given the same port. */
++static void refuse_connections(socket_t bound_fd)
++{
++    close(bound_fd);
++}
++
++static void wait_while_connecting(ssh_session session)
++{
++    ssh_socket s = session->socket;
++    ssh_poll_ctx ctx = NULL;
++    int rc, i;
++
++    ctx = ssh_poll_get_default_ctx(session);
++    assert_non_null(ctx);
++    rc = ssh_poll_ctx_add_socket(ctx, s);
++    assert_int_equal(rc, SSH_OK);
++    for (i = 0; i < 10 && s->state == SSH_SOCKET_CONNECTING; i++) {
++        ssh_poll_ctx_dopoll(ctx, 1000);
++    }
++}
++
 +static void torture_socket_connect_next_address(void **state)
 +{
 +    struct addrinfo *refusing = NULL, *accepting = NULL;
 +    socket_t refusing_fd, accepting_fd, fd;
 +    ssh_session session = NULL;
-+    ssh_poll_ctx ctx = NULL;
 +    ssh_socket s = NULL;
-+    int rc, i;
++    int rc;
 +
 +    (void)state;
 +
-+    /* Connecting to a socket that is bound but not listening is refused */
 +    refusing_fd = bind_loopback(&refusing);
 +    accepting_fd = bind_loopback(&accepting);
++    refuse_connections(refusing_fd);
 +    rc = listen(accepting_fd, 1);
 +    assert_return_code(rc, errno);
 +
@@ -371,26 +435,67 @@ index 00000000..9afb5253
 +    rc = ssh_socket_connect(s, "127.0.0.1", 0, NULL);
 +    assert_int_equal(rc, SSH_OK);
 +
-+    ctx = ssh_poll_get_default_ctx(session);
-+    assert_non_null(ctx);
-+    rc = ssh_poll_ctx_add_socket(ctx, s);
-+    assert_int_equal(rc, SSH_OK);
-+    for (i = 0; i < 10 && s->state == SSH_SOCKET_CONNECTING; i++) {
-+        ssh_poll_ctx_dopoll(ctx, 1000);
-+    }
++    freed_ai = NULL;
++    wait_while_connecting(session);
 +    assert_int_equal(s->state, SSH_SOCKET_CONNECTED);
++    assert_ptr_equal(freed_ai, refusing);
++    assert_null(s->ai);
++    assert_null(s->ai_next);
++    assert_null(s->host);
 +
 +    fd = accept(accepting_fd, NULL, NULL);
 +    assert_return_code(fd, errno);
 +
-+    /* Each list from getaddrinfo() has to be freed on its own */
 +    refusing->ai_next = NULL;
++    freeaddrinfo(refusing);
 +    freeaddrinfo(accepting);
 +
 +    close(fd);
 +    ssh_free(session);
 +    close(accepting_fd);
-+    close(refusing_fd);
++}
++
++static void torture_socket_connect_all_addresses_refused(void **state)
++{
++    struct addrinfo *first = NULL, *second = NULL;
++    socket_t first_fd, second_fd;
++    ssh_session session = NULL;
++    ssh_socket s = NULL;
++    int rc;
++
++    (void)state;
++
++    first_fd = bind_loopback(&first);
++    second_fd = bind_loopback(&second);
++    refuse_connections(first_fd);
++    refuse_connections(second_fd);
++
++    session = ssh_new();
++    assert_non_null(session);
++    s = session->socket;
++
++    /* As if the host resolved to two addresses that both refuse */
++    first->ai_next = second;
++    s->ai = first;
++    s->ai_next = first;
++
++    rc = ssh_socket_connect(s, "127.0.0.1", 0, NULL);
++    assert_int_equal(rc, SSH_OK);
++
++    freed_ai = NULL;
++    wait_while_connecting(session);
++    assert_int_equal(s->state, SSH_SOCKET_CLOSED);
++    assert_int_equal(s->last_errno, ECONNREFUSED);
++    assert_ptr_equal(freed_ai, first);
++    assert_null(s->ai);
++    assert_null(s->ai_next);
++    assert_null(s->host);
++
++    first->ai_next = NULL;
++    freeaddrinfo(first);
++    freeaddrinfo(second);
++
++    ssh_free(session);
 +}
 +
 +int torture_run_tests(void)
@@ -398,6 +503,7 @@ index 00000000..9afb5253
 +    int rc;
 +    struct CMUnitTest tests[] = {
 +        cmocka_unit_test(torture_socket_connect_next_address),
++        cmocka_unit_test(torture_socket_connect_all_addresses_refused),
 +    };
 +
 +    ssh_init();
