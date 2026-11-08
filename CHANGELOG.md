@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.26.3](https://github.com/kosolabs/swift-libssh/compare/v1.26.2...v1.26.3) (2026-11-08)
+
+
+### Bug Fixes
+
+* free libssh's saved addresses once a connection attempt ends ([#209](https://github.com/kosolabs/swift-libssh/issues/209)) ([5aa4a1b](https://github.com/kosolabs/swift-libssh/commit/5aa4a1b47cd82b00ffb0f5a8d2d67365fb9a5370))
+
 ## [1.26.2](https://github.com/kosolabs/swift-libssh/compare/v1.26.1...v1.26.2) (2026-11-07)
 
 
