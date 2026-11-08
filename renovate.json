@@ -9,7 +9,7 @@
   ],
   "semanticCommitType": "fix",
   "automerge": true,
-  "automergeType": "branch",
+  "automergeType": "pr",
   "platformAutomerge": true,
   "packageRules": [
     {
@@ -35,7 +35,7 @@
         "executionMode": "branch",
         "fileFilters": [
           "build.sh",
-          "Sources/CLibSSH/**"
+          "Sources/CLibSSH.xcframework/**"
         ]
       }
     }
